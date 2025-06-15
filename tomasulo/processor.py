@@ -101,6 +101,7 @@ class TomasuloProcessor:
         return True
 
     def execute(self):
+        avancou = False
         for name, station in self.reservation_stations.get_all_stations().items():
             if station.busy:
                 # Decrementa os ciclos restantes se a estação está ocupada
@@ -126,6 +127,8 @@ class TomasuloProcessor:
                     station.instruction = None
                     station.remaining_cycles = 0
                     station.rob_index = None
+                    avancou = True
+        return avancou
 
     def _execute_operation(self, station) -> int:
         """Executa a operação na estação de reserva"""
@@ -164,6 +167,8 @@ class TomasuloProcessor:
             if entry.destination and entry.value is not None:
                 self.register_status.update_on_commit(entry.destination, entry.value)
             self.metrics["committed_instructions"] += 1
+            return True
+        return False
 
     def is_program_finished(self) -> bool:
         """Verifica se o programa terminou"""
@@ -191,18 +196,15 @@ class TomasuloProcessor:
         self.cycle += 1
         self.metrics["total_cycles"] += 1
 
-        # Tenta emitir uma nova instrução
         issued = self.issue()
-        if not issued:
+        executed = self.execute()
+        committed = self.commit()
+
+        # Uma bolha ocorre quando nenhuma operação é realizada
+        # e ainda há instruções para executar
+        if not (issued or executed or committed) and not self.is_program_finished():
             self.metrics["bubble_cycles"] += 1
 
-        # Executa as instruções
-        self.execute()
-
-        # Tenta fazer commit
-        self.commit()
-
-        # Verifica se o programa terminou
         self.is_finished = self.is_program_finished()
         return not self.is_finished
 
