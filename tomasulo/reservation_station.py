@@ -17,7 +17,7 @@ class ReservationStation:
     rob_index: Optional[int] = None  # Índice do ROB associado
 
 class ReservationStations:
-    def __init__(self, n_add=3, n_mul=3, n_load=2, n_store=2):
+    def __init__(self, n_add=3, n_mul=3, n_mem=2):
         # Estações de reserva para operações aritméticas
         self.add_stations: Dict[str, ReservationStation] = {
             f"Add{i}": ReservationStation(f"Add{i}") for i in range(n_add)
@@ -25,12 +25,9 @@ class ReservationStations:
         self.mul_stations: Dict[str, ReservationStation] = {
             f"Mul{i}": ReservationStation(f"Mul{i}") for i in range(n_mul)
         }
-        # Estações de reserva para load/store
-        self.load_stations: Dict[str, ReservationStation] = {
-            f"Load{i}": ReservationStation(f"Load{i}") for i in range(n_load)
-        }
-        self.store_stations: Dict[str, ReservationStation] = {
-            f"Store{i}": ReservationStation(f"Store{i}") for i in range(n_store)
+        # Estações de reserva para load/store unificadas
+        self.mem_stations: Dict[str, ReservationStation] = {
+            f"Mem{i}": ReservationStation(f"Mem{i}") for i in range(n_mem)
         }
 
     def get_available_station(self, instruction: Instruction) -> Optional[ReservationStation]:
@@ -42,19 +39,15 @@ class ReservationStations:
             for station in self.mul_stations.values():
                 if not station.busy:
                     return station
-        elif instruction.type == InstructionType.LD:
-            for station in self.load_stations.values():
-                if not station.busy:
-                    return station
-        elif instruction.type == InstructionType.ST:
-            for station in self.store_stations.values():
+        elif instruction.type in [InstructionType.LD, InstructionType.ST]:
+            for station in self.mem_stations.values():
                 if not station.busy:
                     return station
         return None
 
     def update_stations(self, tag: str, value: int):
         """Atualiza as estações de reserva quando um resultado está disponível"""
-        for stations in [self.add_stations, self.mul_stations, self.load_stations, self.store_stations]:
+        for stations in [self.add_stations, self.mul_stations, self.mem_stations]:
             for station in stations.values():
                 if station.qj == tag:
                     station.vj = value
@@ -64,8 +57,8 @@ class ReservationStations:
                     station.qk = None
 
     def is_ready(self, station: ReservationStation) -> bool:
-        # Para LD, basta estar ocupada e ter ciclos restantes
-        if station.op == InstructionType.LD:
+        # Para LD/ST, basta estar ocupada e ter ciclos restantes
+        if station.op in [InstructionType.LD, InstructionType.ST]:
             return station.busy and station.remaining_cycles > 0
         return (station.busy and 
                 station.qj is None and 
@@ -77,6 +70,5 @@ class ReservationStations:
         return {
             **self.add_stations,
             **self.mul_stations,
-            **self.load_stations,
-            **self.store_stations
+            **self.mem_stations
         } 

@@ -5,9 +5,9 @@ from .register_status import RegisterStatus
 from .reorder_buffer import ReorderBuffer
 
 class TomasuloProcessor:
-    def __init__(self, latencies=None, n_add=3, n_mul=3, n_load=2, n_store=2):
+    def __init__(self, latencies=None, n_add=3, n_mul=3, n_mem=2):
         self.latencies = latencies or {}
-        self.reservation_stations = ReservationStations(n_add=n_add, n_mul=n_mul, n_load=n_load, n_store=n_store)
+        self.reservation_stations = ReservationStations(n_add=n_add, n_mul=n_mul, n_mem=n_mem)
         self.register_status = RegisterStatus()
         self.reorder_buffer = ReorderBuffer()
         self.instructions: List[Instruction] = []
@@ -41,8 +41,7 @@ class TomasuloProcessor:
         self.reservation_stations = ReservationStations(
             n_add=len(self.reservation_stations.add_stations),
             n_mul=len(self.reservation_stations.mul_stations),
-            n_load=len(self.reservation_stations.load_stations),
-            n_store=len(self.reservation_stations.store_stations)
+            n_mem=len(self.reservation_stations.mem_stations)
         )
         self.register_status = RegisterStatus()
         self.reorder_buffer = ReorderBuffer()
