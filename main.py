@@ -13,13 +13,12 @@ def main():
         "LD": 2,
         "ST": 2
     }
-    n_add = 2      # Número de Adders
-    n_mul = 1      # Número de Multipliers
-    n_load = 2     # Número de Load
-    n_store = 2    # Número de Store
+    n_add = 2
+    n_mul = 1
+    n_mem = 2  # Agora controla tanto LD quanto ST
 
     app = QApplication(sys.argv)
-    processor = TomasuloProcessor(latencies=latencies, n_add=n_add, n_mul=n_mul, n_load=n_load, n_store=n_store)
+    processor = TomasuloProcessor(latencies=latencies, n_add=n_add, n_mul=n_mul, n_mem=n_mem)
     window = MainWindow(processor=processor)
     window.show()
     sys.exit(app.exec())
