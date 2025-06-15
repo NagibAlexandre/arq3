@@ -57,9 +57,8 @@ class ReservationStations:
                     station.qk = None
 
     def is_ready(self, station: ReservationStation) -> bool:
-        # Para LD/ST, basta estar ocupada e ter ciclos restantes
-        if station.op in [InstructionType.LD, InstructionType.ST]:
-            return station.busy and station.remaining_cycles > 0
+        # Uma estação está pronta quando está ocupada, tem todos os operandos
+        # e completou sua latência
         return (station.busy and 
                 station.qj is None and 
                 station.qk is None and 

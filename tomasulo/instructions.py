@@ -42,7 +42,7 @@ class InstructionFactory:
         latencies = latencies or {}
         
         if op in ["ADD", "SUB", "MUL", "DIV"]:
-            latency = latencies.get(op, 2 if op in ["MUL", "DIV"] else 1)
+            latency = latencies.get(op, 1)  # Valor padrão mínimo
             return Instruction(
                 type=InstructionType[op],
                 dest=parts[1].strip(','),
@@ -54,7 +54,7 @@ class InstructionFactory:
             # Formato: LD/ST rd, offset(rs)
             dest = parts[1].strip(',')
             offset_rs = parts[2].strip('()').split('(')
-            latency = latencies.get(op, 2)
+            latency = latencies.get(op, 1)  # Valor padrão mínimo
             return Instruction(
                 type=InstructionType[op],
                 dest=dest,
@@ -63,7 +63,7 @@ class InstructionFactory:
                 latency=latency
             )
         elif op in ["BEQ", "BNE"]:
-            latency = latencies.get(op, 1)
+            latency = latencies.get(op, 1)  # Valor padrão mínimo
             return Instruction(
                 type=InstructionType[op],
                 src1=parts[1].strip(','),
@@ -72,7 +72,7 @@ class InstructionFactory:
                 latency=latency
             )
         elif op == "J":
-            latency = latencies.get(op, 1)
+            latency = latencies.get(op, 1)  # Valor padrão mínimo
             return Instruction(
                 type=InstructionType.J,
                 immediate=int(parts[1]),

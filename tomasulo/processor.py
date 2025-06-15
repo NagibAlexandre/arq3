@@ -71,7 +71,8 @@ class TomasuloProcessor:
         station.busy = True
         station.op = instruction.type
         station.instruction = instruction
-        station.remaining_cycles = instruction.latency
+        # Usa a latência definida na instrução
+        station.remaining_cycles = instruction.latency + 1
         station.rob_index = rob_index  # Salva o índice do ROB na estação
 
         # Configura os operandos
@@ -101,10 +102,13 @@ class TomasuloProcessor:
 
     def execute(self):
         for name, station in self.reservation_stations.get_all_stations().items():
-            if station.busy and station.qj is None and station.qk is None:
+            if station.busy:
+                # Decrementa os ciclos restantes se a estação está ocupada
                 if station.remaining_cycles > 0:
                     station.remaining_cycles -= 1
-                if station.remaining_cycles == 0:
+                
+                # Se a latência foi completada e os operandos estão prontos, executa a operação
+                if station.remaining_cycles == 0 and station.qj is None and station.qk is None:
                     result = self._execute_operation(station)
                     # Propaga resultado para as estações dependentes
                     self.reservation_stations.update_stations(station.name, result)
