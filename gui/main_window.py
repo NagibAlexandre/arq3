@@ -274,6 +274,11 @@ class MainWindow(QMainWindow):
 
     def reset_processor(self):
         try:
+            # Fecha a janela de status se estiver aberta
+            if hasattr(self, 'instruction_window'):
+                self.instruction_window.close()
+                del self.instruction_window
+                
             # Create new processor with current configuration
             latencies = {
                 "ADD": self.latency_add.value(),
@@ -390,7 +395,11 @@ class MainWindow(QMainWindow):
 
                     
     def show_instruction_status(self):
-        if not hasattr(self, 'instruction_window'):
-            self.instruction_window = InstructionStatusWindow(self.processor)
+        # Fecha a janela existente se houver
+        if hasattr(self, 'instruction_window'):
+            self.instruction_window.close()
+    
+        # Cria uma nova janela com o processador atual
+        self.instruction_window = InstructionStatusWindow(self.processor)
         self.instruction_window.update_status()
         self.instruction_window.show()
