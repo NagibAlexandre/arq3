@@ -37,7 +37,6 @@ class TomasuloProcessor:
             'write_result': False,
             'commit': False
         } for instr in self.instructions]
-        self.instruction_status = []  # Limpa o status das instruções
         self.current_instruction = 0
         self.cycle = 0
         self.is_finished = False
@@ -65,14 +64,9 @@ class TomasuloProcessor:
 
         instruction = self.instructions[self.current_instruction]
         
-        # Adiciona a instrução ao status com estágio de issue
-        self.instruction_status.append({
-            'instruction': str(instruction),
-            'issue': True,
-            'execute': False,
-            'write_result': False,
-            'commit': False
-        })
+        # Atualiza o status da instrução atual para 'issue'
+        if self.current_instruction < len(self.instruction_status):
+            self.instruction_status[self.current_instruction]['issue'] = True
         
         # Tratamento especial para BEQ
         if instruction.type == InstructionType.BEQ:
