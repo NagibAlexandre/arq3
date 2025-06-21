@@ -4,6 +4,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QSpinBox, QComboBox, QCheckBox, QTabWidget)
 from PyQt6.QtCore import Qt, QTimer
 from tomasulo.processor import TomasuloProcessor
+from gui.instruction_window import InstructionStatusWindow
 
 class MainWindow(QMainWindow):
     def __init__(self, processor=None):
@@ -116,10 +117,13 @@ class MainWindow(QMainWindow):
         self.step_btn = QPushButton("Passo")
         self.run_btn = QPushButton("Executar")
         self.reset_btn = QPushButton("Resetar")
+        self.status_btn = QPushButton("Status Instruções")
         controls_layout.addWidget(self.load_btn)
         controls_layout.addWidget(self.step_btn)
         controls_layout.addWidget(self.run_btn)
         controls_layout.addWidget(self.reset_btn)
+        controls_layout.addWidget(self.status_btn)
+        self.status_btn.clicked.connect(self.show_instruction_status)
         controls_group.setLayout(controls_layout)
         left_layout.addWidget(controls_group)
 
@@ -379,3 +383,14 @@ class MainWindow(QMainWindow):
             elif entry['state'] == "COMMIT":
                 for col in range(5):
                     self.rob_table.item(row, col).setBackground(Qt.GlobalColor.darkGreen)
+        
+        # Atualizar janela de status das instruções se estiver aberta
+        if hasattr(self, 'instruction_window') and self.instruction_window.isVisible():
+            self.instruction_window.update_status()
+
+                    
+    def show_instruction_status(self):
+        if not hasattr(self, 'instruction_window'):
+            self.instruction_window = InstructionStatusWindow(self.processor)
+        self.instruction_window.update_status()
+        self.instruction_window.show()

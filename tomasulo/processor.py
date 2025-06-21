@@ -24,10 +24,20 @@ class TomasuloProcessor:
         # Inicializa a memória com alguns valores para teste
         self.memory[0] = 10  # Valor para R1
         self.memory[4] = 20  # Valor para R2
+        self.instruction_status = [] # Lista para rastrear o status de cada instrução
 
     def load_program(self, program: List[str]):
         """Carrega um programa MIPS"""
         self.instructions = [InstructionFactory.create_instruction(instr, self.latencies) for instr in program]
+        # Inicializa o status das instruções com todas as instruções do programa
+        self.instruction_status = [{
+            'instruction': str(instr),
+            'issue': False,
+            'execute': False,
+            'write_result': False,
+            'commit': False
+        } for instr in self.instructions]
+        self.instruction_status = []  # Limpa o status das instruções
         self.current_instruction = 0
         self.cycle = 0
         self.is_finished = False
@@ -54,6 +64,15 @@ class TomasuloProcessor:
             return False
 
         instruction = self.instructions[self.current_instruction]
+        
+        # Adiciona a instrução ao status com estágio de issue
+        self.instruction_status.append({
+            'instruction': str(instruction),
+            'issue': True,
+            'execute': False,
+            'write_result': False,
+            'commit': False
+        })
         
         # Tratamento especial para BEQ
         if instruction.type == InstructionType.BEQ:
@@ -138,10 +157,17 @@ class TomasuloProcessor:
         avancou = False
         for name, station in self.reservation_stations.get_all_stations().items():
             if station.busy:
+                # Marca que a instrução está em execução quando começa (remaining_cycles == latency)
+                if station.remaining_cycles == station.instruction.latency:
+                    for instr_status in self.instruction_status:
+                        if instr_status['instruction'] == str(station.instruction):
+                            instr_status['execute'] = True
+                            break
+            
                 # Decrementa os ciclos restantes se a estação está ocupada
                 if station.remaining_cycles > 0:
                     station.remaining_cycles -= 1
-                
+            
                 # Se a latência foi completada e os operandos estão prontos, executa a operação
                 if station.remaining_cycles == 0 and station.qj is None and station.qk is None:
                     result = self._execute_operation(station)
@@ -166,43 +192,57 @@ class TomasuloProcessor:
 
     def _execute_operation(self, station) -> int:
         """Executa a operação na estação de reserva"""
-        if station.op == InstructionType.ADD:
-            return (station.vj or 0) + (station.vk or 0)
-        elif station.op == InstructionType.SUB:
-            return (station.vj or 0) - (station.vk or 0)
-        elif station.op == InstructionType.MUL:
-            # Garante que ambos os operandos são números
-            vj = station.vj if station.vj is not None else 0
-            vk = station.vk if station.vk is not None else 0
-            return vj * vk
-        elif station.op == InstructionType.DIV:
-            # Garante que ambos os operandos são números
-            vj = station.vj if station.vj is not None else 0
-            vk = station.vk if station.vk is not None else 1
-            # Verifica divisão por zero
-            if vk == 0:
-                raise ValueError("Divisão por zero detectada")
-            return vj // vk
-        elif station.op == InstructionType.LD:
-            return self.memory.get(station.a, 0)
-        elif station.op == InstructionType.ST:
-            # Verifica se temos o valor a ser armazenado
-            if station.vj is not None:
-                # Armazena o valor na memória
-                self.memory[station.a] = station.vj
-                print(f"ST: Armazenando {station.vj} no endereço {station.a}")
-                return station.vj
-            else:
-                print(f"ST: Erro - valor a ser armazenado é None")
-                return 0
-        elif station.op == InstructionType.BEQ:
-            # Verifica se os valores são iguais
-            is_equal = (station.vj == station.vk)
-            print(f"BEQ: Comparando {station.vj} e {station.vk}, resultado: {'igual' if is_equal else 'diferente'}")
-            return 1 if is_equal else 0
-        elif station.op == InstructionType.BNE:
-            return 1 if (station.vj != station.vk) else 0
-        return 0
+        result = 0  # valor padrão
+    
+        try:
+            if station.op == InstructionType.ADD:
+                result = (station.vj or 0) + (station.vk or 0)
+            elif station.op == InstructionType.SUB:
+                result = (station.vj or 0) - (station.vk or 0)
+            elif station.op == InstructionType.MUL:
+                # Garante que ambos os operandos são números
+                vj = station.vj if station.vj is not None else 0
+                vk = station.vk if station.vk is not None else 0
+                result = vj * vk
+            elif station.op == InstructionType.DIV:
+                # Garante que ambos os operandos são números
+                vj = station.vj if station.vj is not None else 0
+                vk = station.vk if station.vk is not None else 1
+                # Verifica divisão por zero
+                if vk == 0:
+                    raise ValueError("Divisão por zero detectada")
+                result = vj // vk
+            elif station.op == InstructionType.LD:
+                result = self.memory.get(station.a, 0)
+            elif station.op == InstructionType.ST:
+                # Verifica se temos o valor a ser armazenado
+                if station.vj is not None:
+                    # Armazena o valor na memória
+                    self.memory[station.a] = station.vj
+                    print(f"ST: Armazenando {station.vj} no endereço {station.a}")
+                    result = station.vj
+                else:
+                    print(f"ST: Erro - valor a ser armazenado é None")
+                    result = 0
+            elif station.op == InstructionType.BEQ:
+                # Verifica se os valores são iguais
+                is_equal = (station.vj == station.vk)
+                print(f"BEQ: Comparando {station.vj} e {station.vk}, resultado: {'igual' if is_equal else 'diferente'}")
+                result = 1 if is_equal else 0
+            elif station.op == InstructionType.BNE:
+                result = 1 if (station.vj != station.vk) else 0
+    
+            # Marca que a instrução escreveu seu resultado
+            for instr_status in self.instruction_status:
+                if instr_status['instruction'] == str(station.instruction):
+                    instr_status['write_result'] = True
+                    break
+    
+        except Exception as e:
+            print(f"Erro ao executar operação: {e}")
+            result = 0  # Valor padrão em caso de erro
+    
+        return result
 
     def commit(self):
         """Tenta fazer commit de uma instrução"""
@@ -212,6 +252,12 @@ class TomasuloProcessor:
             
         entry = self.reorder_buffer.commit()
         if entry:
+            # Marca que a instrução foi commitada
+            for instr_status in self.instruction_status:
+                if instr_status['instruction'] == str(entry.instruction):
+                    instr_status['commit'] = True
+                    break
+
             print(f"Commitando instrução: {entry.instruction}")
             
             # Verifica se é uma instrução de desvio
@@ -360,6 +406,7 @@ class TomasuloProcessor:
                 }
                 for name, station in self.reservation_stations.get_all_stations().items()
             },
+            "instruction_status": self.instruction_status,
             "reorder_buffer": [
                 {
                     "instruction": str(entry.instruction) if entry else None,
