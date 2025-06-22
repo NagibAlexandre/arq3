@@ -1,0 +1,5 @@
+LD R1, 0(R0)
+LD R2, 4(R0)
+SUB R3, R1, R1
+DIV R4, R1, R3
+ST R4, 8(R0) 

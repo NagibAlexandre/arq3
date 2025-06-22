@@ -248,19 +248,25 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Erro", f"Erro ao carregar programa:\n{str(e)}")
 
     def step(self):
-        if self.processor.step():
-            self.update_ui()
-        else:
+        try:
+            if self.processor.step():
+                self.update_ui()
+            else:
+                self.timer.stop()
+                self.run_btn.setText("Executar")
+                self.status_label.setText("Status: Programa Finalizado")
+                metrics = self.processor.get_metrics()
+                QMessageBox.information(self, "Programa Finalizado", 
+                                      f"O programa foi executado com sucesso!\n\n"
+                                      f"Ciclos totais: {metrics['total_cycles']}\n"
+                                      f"IPC: {metrics['ipc']:.2f}\n"
+                                      f"Ciclos de bolha: {metrics['bubble_cycles']}\n"
+                                      f"Instruções commitadas: {metrics['committed_instructions']}/{metrics['total_instructions']}")
+        except Exception as e:
             self.timer.stop()
             self.run_btn.setText("Executar")
-            self.status_label.setText("Status: Programa Finalizado")
-            metrics = self.processor.get_metrics()
-            QMessageBox.information(self, "Programa Finalizado", 
-                                  f"O programa foi executado com sucesso!\n\n"
-                                  f"Ciclos totais: {metrics['total_cycles']}\n"
-                                  f"IPC: {metrics['ipc']:.2f}\n"
-                                  f"Ciclos de bolha: {metrics['bubble_cycles']}\n"
-                                  f"Instruções commitadas: {metrics['committed_instructions']}/{metrics['total_instructions']}")
+            self.status_label.setText("Status: Erro de Execução")
+            QMessageBox.critical(self, "Erro de Execução", f"Erro durante a execução:\n{str(e)}")
 
     def run(self):
         if self.timer.isActive():

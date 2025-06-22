@@ -374,37 +374,32 @@ class TomasuloProcessor:
         """Executa operação (código anterior mantido com pequenas melhorias)"""
         result = 0
         
-        try:
-            if station.op == InstructionType.ADD:
-                result = (station.vj or 0) + (station.vk or 0)
-            elif station.op == InstructionType.SUB:
-                result = (station.vj or 0) - (station.vk or 0)
-            elif station.op == InstructionType.MUL:
-                vj = station.vj if station.vj is not None else 0
-                vk = station.vk if station.vk is not None else 0
-                result = vj * vk
-            elif station.op == InstructionType.DIV:
-                vj = station.vj if station.vj is not None else 0
-                vk = station.vk if station.vk is not None else 1
-                if vk == 0:
-                    raise ValueError("Divisão por zero detectada")
-                result = vj // vk
-            elif station.op == InstructionType.LD:
-                result = self.memory.get(station.a, 0)
-            elif station.op == InstructionType.ST:
-                if station.vj is not None:
-                    self.memory[station.a] = station.vj
-                    result = station.vj
-                else:
-                    result = 0
-            elif station.op == InstructionType.BEQ:
-                result = 1 if (station.vj == station.vk) else 0
-            elif station.op == InstructionType.BNE:
-                result = 1 if (station.vj != station.vk) else 0
-                
-        except Exception as e:
-            print(f"Erro ao executar operação: {e}")
-            result = 0
+        if station.op == InstructionType.ADD:
+            result = (station.vj or 0) + (station.vk or 0)
+        elif station.op == InstructionType.SUB:
+            result = (station.vj or 0) - (station.vk or 0)
+        elif station.op == InstructionType.MUL:
+            vj = station.vj if station.vj is not None else 0
+            vk = station.vk if station.vk is not None else 0
+            result = vj * vk
+        elif station.op == InstructionType.DIV:
+            vj = station.vj if station.vj is not None else 0
+            vk = station.vk if station.vk is not None else 1
+            if vk == 0:
+                raise ValueError("Divisão por zero detectada")
+            result = vj // vk
+        elif station.op == InstructionType.LD:
+            result = self.memory.get(station.a, 0)
+        elif station.op == InstructionType.ST:
+            if station.vj is not None:
+                self.memory[station.a] = station.vj
+                result = station.vj
+            else:
+                result = 0
+        elif station.op == InstructionType.BEQ:
+            result = 1 if (station.vj == station.vk) else 0
+        elif station.op == InstructionType.BNE:
+            result = 1 if (station.vj != station.vk) else 0
             
         return result
 
