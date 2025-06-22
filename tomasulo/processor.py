@@ -164,7 +164,20 @@ class TomasuloProcessor:
                         instr_status['execute'] = True
                         break
             
-            # Decrementa os ciclos restantes se a estação está ocupada e operandos prontos
+            # Marcar início da execução assim que a estação está pronta e ainda não foi marcada
+            if (
+                station.busy and
+                station.qj is None and
+                station.qk is None and
+                station.remaining_cycles == station.instruction.latency and
+                station.instruction is not None
+            ):
+                for instr_status in self.instruction_status:
+                    if instr_status['instruction'] == str(station.instruction):
+                        if not instr_status['execute']:
+                            instr_status['execute'] = True
+                        break
+            # Agora sim decrementa o ciclo
             if station.qj is None and station.qk is None and station.remaining_cycles > 0:
                 station.remaining_cycles -= 1
             
