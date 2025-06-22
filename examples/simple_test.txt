@@ -1,0 +1,62 @@
+# TESTE SIMPLES PARA VERIFICAR AS CORREÇÕES
+# Este programa é simples para testar se as correções funcionaram
+
+# PROGRAMA SIMPLES:
+ADD R1, R2, R3    # R1 = R2 + R3
+ADD R4, R1, R5    # R4 = R1 + R5
+ADD R6, R4, R7    # R6 = R4 + R7
+
+# VALORES INICIAIS DOS REGISTRADORES:
+# R2 = 2, R3 = 3, R5 = 5, R7 = 7
+
+# RESULTADO ESPERADO:
+# R1 = 5 (2 + 3)
+# R4 = 10 (5 + 5)
+# R6 = 17 (10 + 7)
+
+# COMO TESTAR:
+# 1. Execute o simulador: python main.py
+# 2. Carregue este programa
+# 3. Execute passo a passo
+# 4. Observe se:
+#    - Não há erros
+#    - O programa termina corretamente
+#    - Os valores finais estão corretos
+
+# SEQUÊNCIA DE EXECUÇÃO ESPERADA:
+
+# Ciclo 1: Issue
+# - ADD R1, R2, R3 é emitida para Add1
+
+# Ciclo 2: Issue
+# - ADD R4, R1, R5 é emitida para Add2
+# - Add2.qj = "Add1" (espera R1)
+
+# Ciclo 3: Issue
+# - ADD R6, R4, R7 é emitida para Add3
+# - Add3.qj = "Add2" (espera R4)
+
+# Ciclo 4: Execute
+# - ADD R1, R2, R3 completa
+# - CORREÇÃO: Add2 detecta que Add1 completou e limpa qj
+
+# Ciclo 5: Execute
+# - ADD R4, R1, R5 executa
+# - CORREÇÃO: Add3 detecta que Add2 completou e limpa qj
+
+# Ciclo 6: Execute
+# - ADD R4, R1, R5 completa
+# - ADD R6, R4, R7 executa
+
+# Ciclo 7: Execute
+# - ADD R6, R4, R7 completa
+
+# RESULTADO: Programa termina sem erros!
+
+# INDICADORES DE SUCESSO:
+# 1. Não há erros de execução
+# 2. Não há "Falha ao commitar: entry é None"
+# 3. O programa termina sem loop infinito
+# 4. Todas as instruções são executadas
+# 5. Os valores finais dos registradores estão corretos
+# 6. O programa termina com "Programa finalizado" 
