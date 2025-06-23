@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QTextEdit, QPushButton, QLabel, QTableWidget,
                              QTableWidgetItem, QGroupBox, QGridLayout, QMessageBox,
-                             QSpinBox, QComboBox, QCheckBox, QTabWidget)
+                             QSpinBox, QComboBox, QCheckBox, QTabWidget, QHeaderView)
 from PyQt6.QtCore import Qt, QTimer
 from tomasulo.processor import TomasuloProcessor
 from gui.instruction_window import InstructionStatusWindow
@@ -14,6 +14,7 @@ class MainWindow(QMainWindow):
         else:
             from tomasulo.processor import TomasuloProcessor
             self.processor = TomasuloProcessor()
+        self.is_running = False
         self.init_ui()
         self.update_ui()
 
@@ -159,6 +160,15 @@ class MainWindow(QMainWindow):
         int_registers_layout = QVBoxLayout()
         self.int_registers_table = QTableWidget(32, 3)
         self.int_registers_table.setHorizontalHeaderLabels(["Registrador", "Valor", "Status"])
+        
+        for i in range(32):
+            self.int_registers_table.setItem(i, 0, QTableWidgetItem(f"R{i}"))
+            value_item = QTableWidgetItem("0")
+            self.int_registers_table.setItem(i, 1, value_item)
+            self.int_registers_table.setItem(i, 2, QTableWidgetItem(""))
+        
+        self.int_registers_table.itemChanged.connect(self.on_register_value_changed)
+        
         int_registers_layout.addWidget(self.int_registers_table)
         int_registers_group.setLayout(int_registers_layout)
         registers_tabs.addTab(int_registers_group, "Inteiros")
@@ -168,6 +178,15 @@ class MainWindow(QMainWindow):
         fp_registers_layout = QVBoxLayout()
         self.fp_registers_table = QTableWidget(32, 3)
         self.fp_registers_table.setHorizontalHeaderLabels(["Registrador", "Valor", "Status"])
+        
+        for i in range(32):
+            self.fp_registers_table.setItem(i, 0, QTableWidgetItem(f"F{i}"))
+            value_item = QTableWidgetItem("0")
+            self.fp_registers_table.setItem(i, 1, value_item)
+            self.fp_registers_table.setItem(i, 2, QTableWidgetItem(""))
+        
+        self.fp_registers_table.itemChanged.connect(self.on_register_value_changed)
+        
         fp_registers_layout.addWidget(self.fp_registers_table)
         fp_registers_group.setLayout(fp_registers_layout)
         registers_tabs.addTab(fp_registers_group, "Ponto Flutuante")
@@ -208,6 +227,36 @@ class MainWindow(QMainWindow):
         self.timer = QTimer()
         self.timer.timeout.connect(self.step)
 
+    def on_register_value_changed(self, item):
+        """Chamado quando um valor de registrador é alterado"""
+        if self.is_running:
+            return
+            
+        if item.column() == 1:
+            try:
+                value = int(item.text())
+                row = item.row()
+                
+                if item.tableWidget() == self.int_registers_table:
+                    reg = f"R{row}"
+                else:
+                    reg = f"F{row}"
+                
+                self.processor.register_status.set_value(reg, value)
+                
+            except ValueError:
+                item.setText("0")
+                QMessageBox.warning(self, "Valor Inválido", "Por favor, insira apenas números inteiros.")
+
+    def set_register_editing_enabled(self, enabled):
+        """Habilita ou desabilita a edição dos registradores"""
+        self.int_registers_table.setEditTriggers(
+            QTableWidget.EditTrigger.DoubleClicked if enabled else QTableWidget.EditTrigger.NoEditTriggers
+        )
+        self.fp_registers_table.setEditTriggers(
+            QTableWidget.EditTrigger.DoubleClicked if enabled else QTableWidget.EditTrigger.NoEditTriggers
+        )
+
     def load_program(self):
         try:
             # Get configuration values
@@ -232,6 +281,8 @@ class MainWindow(QMainWindow):
             self.processor.memory[0] = self.mem_r1.value()
             self.processor.memory[4] = self.mem_r2.value()
             
+            self.set_register_initial_values()
+            
             # Load program
             program = self.code_edit.toPlainText().strip().split('\n')
             program = [line.strip() for line in program if line.strip()]
@@ -247,14 +298,41 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Erro", f"Erro ao carregar programa:\n{str(e)}")
 
+    def set_register_initial_values(self):
+        """Define os valores iniciais dos registradores baseado na interface"""
+        for i in range(32):
+            reg = f"R{i}"
+            try:
+                value_item = self.int_registers_table.item(i, 1)
+                if value_item:
+                    value = int(value_item.text())
+                    self.processor.register_status.set_value(reg, value)
+            except ValueError:
+                pass
+        
+        for i in range(32):
+            reg = f"F{i}"
+            try:
+                value_item = self.fp_registers_table.item(i, 1)
+                if value_item:
+                    value = int(value_item.text())
+                    self.processor.register_status.set_value(reg, value)
+            except ValueError:
+                pass
+
     def step(self):
         try:
+            self.is_running = True
+            self.set_register_editing_enabled(False)
+            
             if self.processor.step():
                 self.update_ui()
             else:
                 self.timer.stop()
                 self.run_btn.setText("Executar")
                 self.status_label.setText("Status: Programa Finalizado")
+                self.is_running = False
+                self.set_register_editing_enabled(True)
                 metrics = self.processor.get_metrics()
                 QMessageBox.information(self, "Programa Finalizado", 
                                       f"O programa foi executado com sucesso!\n\n"
@@ -266,6 +344,8 @@ class MainWindow(QMainWindow):
             self.timer.stop()
             self.run_btn.setText("Executar")
             self.status_label.setText("Status: Erro de Execução")
+            self.is_running = False
+            self.set_register_editing_enabled(True)
             QMessageBox.critical(self, "Erro de Execução", f"Erro durante a execução:\n{str(e)}")
 
     def run(self):
@@ -273,10 +353,14 @@ class MainWindow(QMainWindow):
             self.timer.stop()
             self.run_btn.setText("Executar")
             self.status_label.setText("Status: Pausado")
+            self.is_running = False
+            self.set_register_editing_enabled(True)
         else:
             self.timer.start(500)  # 0.5 segundo entre passos
             self.run_btn.setText("Pausar")
             self.status_label.setText("Status: Executando")
+            self.is_running = True
+            self.set_register_editing_enabled(False)
 
     def reset_processor(self):
         try:
@@ -306,12 +390,17 @@ class MainWindow(QMainWindow):
             self.processor.memory[0] = self.mem_r1.value()
             self.processor.memory[4] = self.mem_r2.value()
             
+            self.set_register_initial_values()
+            
             # Reload program if exists
             program = self.code_edit.toPlainText().strip().split('\n')
             program = [line.strip() for line in program if line.strip()]
             
             if program:
                 self.processor.load_program(program)
+            
+            self.is_running = False
+            self.set_register_editing_enabled(True)
             
             self.update_ui()
             self.status_label.setText("Status: Pronto")
@@ -328,27 +417,35 @@ class MainWindow(QMainWindow):
         self.bubbles_label.setText(f"Ciclos de Bolha: {state['metrics']['bubble_cycles']}")
         self.committed_label.setText(f"Instruções Commitadas: {state['metrics']['committed_instructions']}/{state['metrics']['total_instructions']}")
 
-        # Atualizar registradores inteiros
-        self.int_registers_table.setRowCount(0)
+        # Atualizar registradores inteiros (preservando valores editados pelo usuário)
         for i in range(32):
             reg = f"R{i}"
             info = state['registers'].get(reg, {'value': 0, 'status': None})
-            row = self.int_registers_table.rowCount()
-            self.int_registers_table.insertRow(row)
-            self.int_registers_table.setItem(row, 0, QTableWidgetItem(reg))
-            self.int_registers_table.setItem(row, 1, QTableWidgetItem(str(info['value'])))
-            self.int_registers_table.setItem(row, 2, QTableWidgetItem(str(info['status'])))
+            
+            # Atualizar valor apenas se não estiver sendo editado
+            value_item = self.int_registers_table.item(i, 1)
+            if value_item and not value_item.isSelected():
+                value_item.setText(str(info['value']))
+            
+            # Atualizar status
+            status_item = self.int_registers_table.item(i, 2)
+            if status_item:
+                status_item.setText(str(info['status']))
 
-        # Atualizar registradores ponto flutuante
-        self.fp_registers_table.setRowCount(0)
+        # Atualizar registradores ponto flutuante (preservando valores editados pelo usuário)
         for i in range(32):
             reg = f"F{i}"
             info = state['registers'].get(reg, {'value': 0, 'status': None})
-            row = self.fp_registers_table.rowCount()
-            self.fp_registers_table.insertRow(row)
-            self.fp_registers_table.setItem(row, 0, QTableWidgetItem(reg))
-            self.fp_registers_table.setItem(row, 1, QTableWidgetItem(str(info['value'])))
-            self.fp_registers_table.setItem(row, 2, QTableWidgetItem(str(info['status'])))
+            
+            # Atualizar valor apenas se não estiver sendo editado
+            value_item = self.fp_registers_table.item(i, 1)
+            if value_item and not value_item.isSelected():
+                value_item.setText(str(info['value']))
+            
+            # Atualizar status
+            status_item = self.fp_registers_table.item(i, 2)
+            if status_item:
+                status_item.setText(str(info['status']))
 
         # Atualizar estações de reserva
         self.stations_table.setRowCount(0)
@@ -381,19 +478,29 @@ class MainWindow(QMainWindow):
             # Highlight speculative entries
             if entry.get('branch_mispredicted', False):
                 for col in range(5):
-                    self.rob_table.item(row, col).setBackground(Qt.GlobalColor.yellow)
+                    item = self.rob_table.item(row, col)
+                    if item:
+                        item.setBackground(Qt.GlobalColor.yellow)
             elif entry['state'] == "ISSUE":
                 for col in range(5):
-                    self.rob_table.item(row, col).setBackground(Qt.GlobalColor.lightGray)
+                    item = self.rob_table.item(row, col)
+                    if item:
+                        item.setBackground(Qt.GlobalColor.lightGray)
             elif entry['state'] == "EXECUTE":
                 for col in range(5):
-                    self.rob_table.item(row, col).setBackground(Qt.GlobalColor.cyan)
+                    item = self.rob_table.item(row, col)
+                    if item:
+                        item.setBackground(Qt.GlobalColor.cyan)
             elif entry['state'] == "WRITE_RESULT":
                 for col in range(5):
-                    self.rob_table.item(row, col).setBackground(Qt.GlobalColor.green)
+                    item = self.rob_table.item(row, col)
+                    if item:
+                        item.setBackground(Qt.GlobalColor.green)
             elif entry['state'] == "COMMIT":
                 for col in range(5):
-                    self.rob_table.item(row, col).setBackground(Qt.GlobalColor.darkGreen)
+                    item = self.rob_table.item(row, col)
+                    if item:
+                        item.setBackground(Qt.GlobalColor.darkGreen)
         
         # Atualizar janela de status das instruções se estiver aberta
         if hasattr(self, 'instruction_window') and self.instruction_window.isVisible():
