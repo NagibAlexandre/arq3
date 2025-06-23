@@ -126,21 +126,12 @@ class MainWindow(QMainWindow):
         self.run_btn = QPushButton("Executar")
         self.reset_btn = QPushButton("Resetar")
         self.status_btn = QPushButton("Status Instruções")
-        self.demo_btn = QPushButton("Exemplo Paralelismo")
-        self.mult_div_btn = QPushButton("Exemplo Mult/Div")
-        self.branch_btn = QPushButton("Exemplo Desvios")
         controls_layout.addWidget(self.load_btn)
         controls_layout.addWidget(self.step_btn)
         controls_layout.addWidget(self.run_btn)
         controls_layout.addWidget(self.reset_btn)
         controls_layout.addWidget(self.status_btn)
-        controls_layout.addWidget(self.demo_btn)
-        controls_layout.addWidget(self.mult_div_btn)
-        controls_layout.addWidget(self.branch_btn)
         self.status_btn.clicked.connect(self.show_instruction_status)
-        self.demo_btn.clicked.connect(self.load_parallelism_demo)
-        self.mult_div_btn.clicked.connect(self.load_mult_div_demo)
-        self.branch_btn.clicked.connect(self.load_branch_demo)
         controls_group.setLayout(controls_layout)
         left_layout.addWidget(controls_group)
 
@@ -161,6 +152,13 @@ class MainWindow(QMainWindow):
         
         metrics_group.setLayout(metrics_layout)
         left_layout.addWidget(metrics_group)
+
+        # Painel de log de renomeações
+        self.rename_log = QTextEdit()
+        self.rename_log.setReadOnly(True)
+        self.rename_log.setMaximumHeight(120)
+        self.rename_log.setPlaceholderText("Renomeações de registradores (WAW/WAR) aparecerão aqui...")
+        left_layout.addWidget(self.rename_log)
 
         # Informações sobre paralelismo
         info_group = QGroupBox("Informações sobre Paralelismo")
@@ -191,8 +189,8 @@ class MainWindow(QMainWindow):
         # Registradores inteiros
         int_registers_group = QGroupBox("Registradores Inteiros (R0-R31)")
         int_registers_layout = QVBoxLayout()
-        self.int_registers_table = QTableWidget(32, 4)
-        self.int_registers_table.setHorizontalHeaderLabels(["Registrador", "Físico", "Valor", "Status"])
+        self.int_registers_table = QTableWidget(32, 3)
+        self.int_registers_table.setHorizontalHeaderLabels(["Registrador", "Valor", "Status"])
         int_registers_layout.addWidget(self.int_registers_table)
         int_registers_group.setLayout(int_registers_layout)
         registers_tabs.addTab(int_registers_group, "Inteiros")
@@ -200,8 +198,8 @@ class MainWindow(QMainWindow):
         # Registradores ponto flutuante
         fp_registers_group = QGroupBox("Registradores Ponto Flutuante (F0-F31)")
         fp_registers_layout = QVBoxLayout()
-        self.fp_registers_table = QTableWidget(32, 4)
-        self.fp_registers_table.setHorizontalHeaderLabels(["Registrador", "Físico", "Valor", "Status"])
+        self.fp_registers_table = QTableWidget(32, 3)
+        self.fp_registers_table.setHorizontalHeaderLabels(["Registrador", "Valor", "Status"])
         fp_registers_layout.addWidget(self.fp_registers_table)
         fp_registers_group.setLayout(fp_registers_layout)
         registers_tabs.addTab(fp_registers_group, "Ponto Flutuante")
@@ -372,9 +370,8 @@ class MainWindow(QMainWindow):
             row = self.int_registers_table.rowCount()
             self.int_registers_table.insertRow(row)
             self.int_registers_table.setItem(row, 0, QTableWidgetItem(reg))
-            self.int_registers_table.setItem(row, 1, QTableWidgetItem(str(info['physical'])))
-            self.int_registers_table.setItem(row, 2, QTableWidgetItem(str(info['value'])))
-            self.int_registers_table.setItem(row, 3, QTableWidgetItem(str(info['status'])))
+            self.int_registers_table.setItem(row, 1, QTableWidgetItem(str(info['value'])))
+            self.int_registers_table.setItem(row, 2, QTableWidgetItem(str(info['status'])))
 
         # Atualizar registradores ponto flutuante
         self.fp_registers_table.setRowCount(0)
@@ -384,9 +381,8 @@ class MainWindow(QMainWindow):
             row = self.fp_registers_table.rowCount()
             self.fp_registers_table.insertRow(row)
             self.fp_registers_table.setItem(row, 0, QTableWidgetItem(reg))
-            self.fp_registers_table.setItem(row, 1, QTableWidgetItem(str(info['physical'])))
-            self.fp_registers_table.setItem(row, 2, QTableWidgetItem(str(info['value'])))
-            self.fp_registers_table.setItem(row, 3, QTableWidgetItem(str(info['status'])))
+            self.fp_registers_table.setItem(row, 1, QTableWidgetItem(str(info['value'])))
+            self.fp_registers_table.setItem(row, 2, QTableWidgetItem(str(info['status'])))
 
         # Atualizar estações de reserva
         self.stations_table.setRowCount(0)
@@ -433,6 +429,12 @@ class MainWindow(QMainWindow):
                 for col in range(5):
                     self.rob_table.item(row, col).setBackground(Qt.GlobalColor.darkGreen)
         
+        # Atualizar painel de log de renomeações
+        if hasattr(self.processor, 'renames_log') and self.processor.renames_log:
+            self.rename_log.setPlainText('\n'.join(self.processor.renames_log))
+        else:
+            self.rename_log.clear()
+
         # Atualizar janela de status das instruções se estiver aberta
         if hasattr(self, 'instruction_window') and self.instruction_window.isVisible():
             self.instruction_window.update_status()
@@ -447,73 +449,3 @@ class MainWindow(QMainWindow):
         self.instruction_window = InstructionStatusWindow(self.processor)
         self.instruction_window.update_status()
         self.instruction_window.show()
-
-    def load_parallelism_demo(self):
-        """Carrega o exemplo de demonstração de paralelismo"""
-        try:
-            # Carrega o exemplo de demonstração
-            with open('examples/parallelism_demo.txt', 'r') as f:
-                program = [line.strip() for line in f.readlines() if line.strip() and not line.strip().startswith('#')]
-            
-            # Atualiza a área de código
-            self.code_edit.setPlainText('\n'.join(program))
-            
-            # Carrega o programa automaticamente
-            self.load_program()
-            
-            QMessageBox.information(self, "Exemplo Carregado", 
-                                  "Exemplo de demonstração de paralelismo carregado!\n\n"
-                                  "Este programa demonstra:\n"
-                                  "• Despacho fora de ordem\n"
-                                  "• Renomeação de registradores\n"
-                                  "• Controle de paralelismo\n\n"
-                                  "Experimente ajustar o 'Max Issue/Ciclo' para ver diferentes comportamentos.")
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Erro", f"Erro ao carregar exemplo:\n{str(e)}")
-
-    def load_mult_div_demo(self):
-        """Carrega o exemplo de demonstração de multiplicação e divisão"""
-        try:
-            # Carrega o exemplo de demonstração
-            with open('examples/mult_div_demo.txt', 'r') as f:
-                program = [line.strip() for line in f.readlines() if line.strip() and not line.strip().startswith('#')]
-            
-            # Atualiza a área de código
-            self.code_edit.setPlainText('\n'.join(program))
-            
-            # Carrega o programa automaticamente
-            self.load_program()
-            
-            QMessageBox.information(self, "Exemplo Carregado", 
-                                  "Exemplo de demonstração de multiplicação e divisão carregado!\n\n"
-                                  "Este programa demonstra:\n"
-                                  "• Multiplicação e divisão\n"
-                                  "• Uso de registradores de ponto flutuante\n\n"
-                                  "Experimente ajustar o 'Max Issue/Ciclo' para ver diferentes comportamentos.")
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Erro", f"Erro ao carregar exemplo:\n{str(e)}")
-
-    def load_branch_demo(self):
-        """Carrega o exemplo de demonstração de desvios"""
-        try:
-            # Carrega o exemplo de demonstração
-            with open('examples/branch_demo.txt', 'r') as f:
-                program = [line.strip() for line in f.readlines() if line.strip() and not line.strip().startswith('#')]
-            
-            # Atualiza a área de código
-            self.code_edit.setPlainText('\n'.join(program))
-            
-            # Carrega o programa automaticamente
-            self.load_program()
-            
-            QMessageBox.information(self, "Exemplo Carregado", 
-                                  "Exemplo de demonstração de desvios carregado!\n\n"
-                                  "Este programa demonstra:\n"
-                                  "• Desvios condicionais\n"
-                                  "• Uso de registradores de ponto flutuante\n\n"
-                                  "Experimente ajustar o 'Max Issue/Ciclo' para ver diferentes comportamentos.")
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Erro", f"Erro ao carregar exemplo:\n{str(e)}")

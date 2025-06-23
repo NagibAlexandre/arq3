@@ -21,8 +21,8 @@ def main():
     app = QApplication(sys.argv)
     processor = TomasuloProcessor(latencies=latencies, n_add=n_add, n_mul=n_mul, n_mem=n_mem, max_issue_per_cycle=max_issue_per_cycle)
     
-    # Carrega exemplo de demonstração do paralelismo
-    with open('examples/parallelism_demo.txt', 'r') as f:
+    # Carrega exemplo simples de demonstração de dependências
+    with open('examples/simple_dependency_demo.txt', 'r', encoding='utf-8') as f:
         program = [line.strip() for line in f.readlines() if line.strip() and not line.strip().startswith('#')]
     
     processor.load_program(program)

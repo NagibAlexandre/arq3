@@ -48,6 +48,7 @@ class TomasuloProcessor:
         # Estado de recuperação
         self.recovering_from_misprediction = False
         self.pending_branch_resolutions: List[Dict] = []
+        self.renames_log = []  # Log de renomeações do ciclo
 
     def load_program(self, program: List[str]):
         """Carrega um programa MIPS"""
@@ -106,7 +107,7 @@ class TomasuloProcessor:
    
     # processor.py (correção específica para desvios)
     def issue(self) -> bool:
-        """Tenta emitir uma nova instrução com despacho fora de ordem e renomeação física"""
+        """Tenta emitir uma nova instrução com despacho fora de ordem e renomeação física inteligente"""
         if not self.pending_instructions:
             return False
 
@@ -130,6 +131,18 @@ class TomasuloProcessor:
                 continue
             if self.reorder_buffer.is_full():
                 continue
+                
+            # DETECÇÃO DE DEPENDÊNCIAS
+            dep_type = self._check_dependencies(pc, instruction, return_type=True)
+            needs_renaming = bool(dep_type)
+            if needs_renaming:
+                old_phys = self.register_status.allocate_physical(instruction.dest)
+                msg = f"PC {pc}: {instruction.dest} - {old_phys} → {self.register_status.get_physical(instruction.dest)} ({dep_type})"
+                self.renames_log.append(msg)
+                print(f"Renomeação necessária para {instruction.dest} (PC {pc}): {old_phys} -> {self.register_status.get_physical(instruction.dest)} [{dep_type}]")
+            else:
+                print(f"Renomeação não necessária para {instruction.dest} (PC {pc})")
+            
             branch_prediction = None
             next_pc = pc + 1
             if (self.enable_speculation and 
@@ -147,17 +160,12 @@ class TomasuloProcessor:
                 self.instruction_status[pc]['speculative'] = True
                 self.metrics["speculative_instructions"] += 1
 
-            # RENOMEAÇÃO FÍSICA: Aloca físico novo para destino
-            old_phys = None
-            if instruction.dest and instruction.type not in [InstructionType.ST, InstructionType.BEQ, InstructionType.BNE]:
-                old_phys = self.register_status.allocate_physical(instruction.dest)
-
             is_speculative = (self.enable_speculation and self.speculation_manager.is_speculative())
             rob_index = self.reorder_buffer.add_entry(
                 instruction, instruction.dest, speculative=is_speculative
             )
-            # Salva o físico antigo na entrada do ROB
-            if old_phys is not None:
+            # Salva o físico antigo na entrada do ROB apenas se houve renomeação
+            if 'old_phys' in locals() and old_phys is not None:
                 self.reorder_buffer.entries[rob_index].old_phys = old_phys
 
             if is_speculative:
@@ -183,6 +191,29 @@ class TomasuloProcessor:
                 self.pc = next_pc
         return issued_any
 
+    def _check_dependencies(self, current_pc: int, instruction, return_type=False) -> bool:
+        """Verifica se há dependências que requerem renomeação. Se return_type=True, retorna 'WAW', 'WAR' ou ''"""
+        if not instruction.dest:
+            return False if not return_type else ''
+        for pc in self.issued_instructions:
+            if pc >= current_pc:
+                continue
+            other_instruction = self.instructions[pc]
+            # WAW (Write After Write) - Dependência falsa
+            if (other_instruction.dest and 
+                other_instruction.dest == instruction.dest and
+                other_instruction.type not in [InstructionType.ST, InstructionType.BEQ, InstructionType.BNE]):
+                if return_type:
+                    return 'WAW'
+                return True
+            # WAR (Write After Read) - Antidependência
+            if (other_instruction.dest and 
+                other_instruction.dest in [instruction.src1, instruction.src2] and
+                other_instruction.type not in [InstructionType.ST, InstructionType.BEQ, InstructionType.BNE]):
+                if return_type:
+                    return 'WAR'
+                return True
+        return False if not return_type else ''
 
     def _configure_operands(self, station, instruction):
         """Configura operandos incluindo para desvios"""
@@ -501,6 +532,7 @@ class TomasuloProcessor:
 
     def step(self) -> bool:
         """Executa um ciclo do processador"""
+        self.renames_log = []  # Limpa log de renomeações a cada ciclo
         if self.is_finished:
             return False
 

@@ -1,0 +1,7 @@
+LD R1, 0(R0)    # Carrega valor da memória
+LD R2, 4(R0)    # Carrega outro valor
+ADD R3, R1, R2  # R3 = R1 + R2 (primeira escrita em R3)
+MUL R3, R3, R1  # R3 = R3 * R1 (WAW: segunda escrita em R3 - precisa renomear)
+ADD R4, R3, R2  # R4 = R3 + R2 (lê R3 que foi renomeado)
+MUL R1, R4, R3  # R1 = R4 * R3 (WAR: escreve em R1 que é lido por instruções anteriores)
+ST R1, 8(R0)    # Armazena resultado final 

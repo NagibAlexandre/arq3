@@ -1,0 +1,6 @@
+LD R1, 0(R0)    # Carrega valor
+LD R2, 4(R0)    # Carrega outro valor
+ADD R3, R1, R2  # R3 = R1 + R2 (primeira escrita em R3)
+MUL R3, R3, R1  # R3 = R3 * R1 (WAW: segunda escrita em R3 - RENOMEAÇÃO NECESSÁRIA)
+ADD R4, R3, R2  # R4 = R3 + R2 (lê R3 renomeado)
+ST R4, 8(R0)    # Armazena resultado 
