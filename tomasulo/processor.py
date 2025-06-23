@@ -111,7 +111,10 @@ class TomasuloProcessor:
         if self.reorder_buffer.is_full():
             return False
 
-        # ESPECULAÇÃO: Faz predição para desvios
+        # Instruções normais após desvios são especulativas
+        is_speculative_before = (self.enable_speculation and 
+                            self.speculation_manager.is_speculative())
+
         branch_prediction = None
         next_pc = self.pc + 1  # PC padrão (sequencial)
 
@@ -121,25 +124,38 @@ class TomasuloProcessor:
             branch_prediction = self.branch_predictor.predict(self.pc, instruction.type.value)
             
             if branch_prediction.taken:
-                # CORREÇÃO: Cálculo correto do endereço de desvio
+                # Cálculo correto do endereço de desvio
                 next_pc = self.pc + 1 + (instruction.immediate or 0)
                 print(f"Predição: Desvio tomado de PC {self.pc} para {next_pc}")
+                # Inicia nova especulação para o target
                 self.speculation_manager.start_speculation(self.pc, next_pc)
             else:
-                # Mantém PC sequencial
+                # Predição "não tomado" - continua sequencialmente
                 next_pc = self.pc + 1
                 print(f"Predição: Desvio não tomado no PC {self.pc}, próximo PC: {next_pc}")
+                # Inicia especulação para o path "não tomado"
+                self.speculation_manager.start_speculation(self.pc, next_pc)
+
+        # CORREÇÃO: Determina se a instrução ATUAL é especulativa
+        # - Desvios em si não são especulativos, eles CRIAM especulação
+        # - Instruções normais são especulativas se já estamos em modo especulativo
+        if instruction.type in [InstructionType.BEQ, InstructionType.BNE]:
+            # Desvios são especulativos apenas se já estávamos especulando
+            is_speculative = is_speculative_before
+        else:
+            # Instruções normais: especulativas se estamos em modo especulativo
+            # (isso inclui instruções após desvios)
+            is_speculative = (self.enable_speculation and 
+                            self.speculation_manager.is_speculative())
 
         # Atualiza status da instrução
         if self.pc < len(self.instruction_status):
             self.instruction_status[self.pc]['issue'] = self.cycle
-            if self.enable_speculation and self.speculation_manager.is_speculative():
+            if is_speculative:
                 self.instruction_status[self.pc]['speculative'] = True
                 self.metrics["speculative_instructions"] += 1
 
         # Adiciona entrada no ROB
-        is_speculative = (self.enable_speculation and 
-                        self.speculation_manager.is_speculative())
         rob_index = self.reorder_buffer.add_entry(
             instruction, instruction.dest, speculative=is_speculative
         )
@@ -156,24 +172,20 @@ class TomasuloProcessor:
         station.instruction = instruction
         station.remaining_cycles = instruction.latency + 1
         station.rob_index = rob_index
-        station.pc = self.pc  # Importante: salva PC na estação
+        station.pc = self.pc
         station.branch_prediction = branch_prediction
         station.speculative = is_speculative
 
-        # Configura operandos (INCLUINDO para desvios)
         self._configure_operands(station, instruction)
 
-        # Atualiza status do registrador de destino
         if instruction.dest and instruction.type not in [InstructionType.ST, InstructionType.BEQ, InstructionType.BNE]:
             self.register_status.set_status(instruction.dest, station.name)
 
-        # CRÍTICO: Atualiza PC baseado na predição
         old_pc = self.pc
         self.pc = next_pc
 
-        print(f"Issue: PC {old_pc} -> {self.pc}, instrução: {instruction}")
+        print(f"Issue: PC {old_pc} -> {self.pc}, instrução: {instruction} (especulativa: {is_speculative})")
         return True
-
 
     def _configure_operands(self, station, instruction):
         """Configura operandos incluindo para desvios"""

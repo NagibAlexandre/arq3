@@ -26,9 +26,7 @@ class RegisterStatus:
         return self.status[register]
 
     def set_status(self, register: str, station: Optional[str]):
-        print(f"Renomeando registrador {register} para estação {station}")
         """Atualiza o status do registrador"""
-        print("wbrewu")
         self.status[register] = station
 
     def is_ready(self, register: str) -> bool:

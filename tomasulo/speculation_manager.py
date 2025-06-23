@@ -30,11 +30,15 @@ class SpeculationManager:
 
     def start_speculation(self, branch_pc: int, predicted_target: int) -> int:
         """Inicia especulação a partir de um desvio"""
-        self.speculation_level += 1
-        self.branch_stack.append(branch_pc)
-        
-        if self.speculation_level > self.stats['max_speculation_level']:
-            self.stats['max_speculation_level'] = self.speculation_level
+        # CORREÇÃO: Só incrementa se não estamos já especulando deste branch
+        if not self.branch_stack or self.branch_stack[-1] != branch_pc:
+            self.speculation_level += 1
+            self.branch_stack.append(branch_pc)
+            
+            if self.speculation_level > self.stats['max_speculation_level']:
+                self.stats['max_speculation_level'] = self.speculation_level
+            
+            print(f"Iniciando especulação level {self.speculation_level} para branch PC {branch_pc}")
         
         return predicted_target
 
@@ -80,14 +84,19 @@ class SpeculationManager:
         """Flush instruções especulativas após misprediction"""
         flushed_rob_indices = []
 
-        # Marca instruções para flush (todas especulativas após o branch)
+        # CORREÇÃO: Flush todas as instruções especulativas que vieram 
+        # APÓS o desvio (independente do branch_pc específico)
         instructions_to_remove = []
         for i, spec_instr in enumerate(self.speculative_instructions):
-            # Flush instruções especulativas que vieram após o branch
-            if spec_instr.pc > branch_pc:
+            # Flush instruções que têm PC maior que o branch que causou misprediction
+            # OU que foram emitidas especulativamente devido a este branch
+            if (spec_instr.pc > branch_pc or 
+                spec_instr.branch_pc == branch_pc):
+                
                 flushed_rob_indices.append(spec_instr.rob_index)
                 instructions_to_remove.append(i)
                 self.stats['speculative_instructions_flushed'] += 1
+                print(f"Flushing instrução especulativa no PC {spec_instr.pc} (ROB {spec_instr.rob_index})")
 
         # Remove instruções flushed
         for i in reversed(instructions_to_remove):
@@ -97,6 +106,11 @@ class SpeculationManager:
         if self.branch_stack and self.branch_stack[-1] == branch_pc:
             self.branch_stack.pop()
             self.speculation_level = max(0, self.speculation_level - 1)
+        
+        # CORREÇÃO: Se flushed alguma instrução, reset completo da especulação
+        if flushed_rob_indices:
+            self.speculation_level = 0
+            self.branch_stack.clear()
 
         return flushed_rob_indices
 
@@ -117,3 +131,6 @@ class SpeculationManager:
     def get_stats(self) -> Dict:
         """Retorna estatísticas de especulação"""
         return self.stats.copy()
+    
+
+    
