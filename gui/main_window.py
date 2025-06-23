@@ -207,7 +207,7 @@ class MainWindow(QMainWindow):
         # Buffer de Reordenamento
         rob_group = QGroupBox("Buffer de Reordenamento")
         rob_layout = QVBoxLayout()
-        self.rob_table = QTableWidget(8, 6)  # Added state column
+        self.rob_table = QTableWidget(self.buffer_rob.value(), 6)  # Use configured ROB size
         self.rob_table.setHorizontalHeaderLabels(
             ["Instrução", "Estado", "Destino", "Valor", "Pronto", "Especulação"]
         )
@@ -222,6 +222,9 @@ class MainWindow(QMainWindow):
         self.step_btn.clicked.connect(self.step)
         self.run_btn.clicked.connect(self.run)
         self.reset_btn.clicked.connect(self.reset_processor)
+        
+        # Conectar mudança do tamanho do ROB
+        self.buffer_rob.valueChanged.connect(self.update_rob_table_size)
 
         # Timer para execução contínua
         self.timer = QTimer()
@@ -274,7 +277,8 @@ class MainWindow(QMainWindow):
                 latencies=latencies,
                 n_add=self.buffer_add.value(),
                 n_mul=self.buffer_mul.value(),
-                n_mem=self.buffer_mem.value()
+                n_mem=self.buffer_mem.value(),
+                rob_size=self.buffer_rob.value()
             )
             
             # Set memory initial values
@@ -383,7 +387,8 @@ class MainWindow(QMainWindow):
                 latencies=latencies,
                 n_add=self.buffer_add.value(),
                 n_mul=self.buffer_mul.value(),
-                n_mem=self.buffer_mem.value()
+                n_mem=self.buffer_mem.value(),
+                rob_size=self.buffer_rob.value()
             )
             
             # Reset memory values
@@ -462,6 +467,10 @@ class MainWindow(QMainWindow):
             self.stations_table.setItem(row, 7, QTableWidgetItem(str(info.get('remaining_cycles', ''))))
 
         # Atualizar buffer de reordenamento
+        # Garantir que a tabela tenha o tamanho correto
+        if self.rob_table.rowCount() != self.buffer_rob.value():
+            self.rob_table.setRowCount(self.buffer_rob.value())
+            
         self.rob_table.setRowCount(0)
         for entry in state['reorder_buffer']:
             if entry is None:
@@ -516,3 +525,6 @@ class MainWindow(QMainWindow):
         self.instruction_window = InstructionStatusWindow(self.processor)
         self.instruction_window.update_status()
         self.instruction_window.show()
+
+    def update_rob_table_size(self):
+        self.rob_table.setRowCount(self.buffer_rob.value())

@@ -7,11 +7,11 @@ from .branch_predictor import BranchPredictor, BranchPrediction
 from .speculation_manager import SpeculationManager
 
 class TomasuloProcessor:
-    def __init__(self, latencies=None, n_add=3, n_mul=3, n_mem=2, enable_speculation=True):
+    def __init__(self, latencies=None, n_add=3, n_mul=3, n_mem=2, rob_size=8, enable_speculation=True):
         self.latencies = latencies or {}
         self.reservation_stations = ReservationStations(n_add=n_add, n_mul=n_mul, n_mem=n_mem)
         self.register_status = RegisterStatus()
-        self.reorder_buffer = ReorderBuffer()
+        self.reorder_buffer = ReorderBuffer(size=rob_size)
         
         # Sistema de especulação
         self.enable_speculation = enable_speculation
@@ -80,7 +80,7 @@ class TomasuloProcessor:
             n_mem=len(self.reservation_stations.mem_stations)
         )
         self.register_status = RegisterStatus()
-        self.reorder_buffer = ReorderBuffer()
+        self.reorder_buffer = ReorderBuffer(size=self.reorder_buffer.size)
         
         if self.enable_speculation:
             self.branch_predictor = BranchPredictor()
