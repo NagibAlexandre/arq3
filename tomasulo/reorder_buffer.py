@@ -12,6 +12,7 @@ class ROBEntry:
     branch_mispredicted: bool = False
     speculative: bool = False
     flushed: bool = False  # Nova flag
+    old_phys: Optional[str] = None  # Para renomeação física
 
 class ReorderBuffer:
     def __init__(self, size: int = 8):

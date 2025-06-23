@@ -1,0 +1,7 @@
+LD R1, 0(R0)    # Carrega valor da memória
+MUL R2, R1, R1  # Multiplicação longa (3 ciclos)
+MUL R3, R1, R1  # Outra multiplicação longa
+ADD R4, R2, R3  # Depende de R2 e R3
+ST R4, 8(R0)    # Store do resultado
+ADD R5, R1, R1  # Operação simples que não depende das multiplicações
+ST R5, 12(R0)   # Store independente 

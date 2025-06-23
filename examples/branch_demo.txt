@@ -1,0 +1,8 @@
+LD R1, 0(R0)    # Carrega valor da memória
+LD R2, 4(R0)    # Carrega outro valor
+ADD R3, R1, R2  # Soma R1 e R2
+SUB R4, R3, R1  # Subtrai R1 de R3
+BEQ R3, R4, 2   # Se R3 == R4, pula 2 instruções
+ADD R5, R3, R4  # Soma R3 e R4 (pode ser pulado)
+SUB R6, R5, R1  # Subtrai R1 de R5 (pode ser pulado)
+ST R6, 8(R0)    # Armazena resultado final 

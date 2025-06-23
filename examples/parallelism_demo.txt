@@ -1,0 +1,8 @@
+LD R1, 0(R0)    # Carrega valor da memória
+LD R2, 4(R0)    # Carrega outro valor
+ADD R3, R1, R2  # Soma os valores
+MUL R4, R3, R1  # Multiplica resultado por R1
+SUB R5, R4, R2  # Subtrai R2 do resultado
+MUL R6, R5, R3  # Multiplica R5 por R3
+ADD R7, R6, R4  # Soma R6 com R4
+ST R7, 8(R0)    # Armazena resultado final 
