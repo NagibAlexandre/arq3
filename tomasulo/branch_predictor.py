@@ -50,37 +50,53 @@ class BranchPredictor:
         }
 
     def predict(self, pc: int, instruction_type: str) -> BranchPrediction:
-        """Faz uma predição para um desvio - VERSÃO CORRIGIDA"""
+        """Faz uma predição para um desvio"""
         self.stats['total_predictions'] += 1
-        
-        # Verifica se há entrada no BTB
+
         btb_entry = self.btb.get(pc)
         btb_hit = btb_entry is not None and btb_entry.valid
-        
+
         if btb_hit:
             self.stats['btb_hits'] += 1
-            # Usa preditor de 2 bits da entrada BTB
-            taken = btb_entry.prediction_state in [PredictionState.WEAKLY_TAKEN, 
-                                                PredictionState.STRONGLY_TAKEN]
+            taken = btb_entry.prediction_state in [
+                PredictionState.WEAKLY_TAKEN, 
+                PredictionState.STRONGLY_TAKEN
+            ]
             target = btb_entry.target
             confidence = self._get_confidence(btb_entry.prediction_state)
         else:
             self.stats['btb_misses'] += 1
-            # Usa preditor global para primeira predição
+            # Usar preditor global
             pattern_index = self.global_history & ((1 << self.history_bits) - 1)
             prediction_state = self.pattern_table[pattern_index]
-            taken = prediction_state in [PredictionState.WEAKLY_TAKEN, 
-                                    PredictionState.STRONGLY_TAKEN]
-            # CORREÇÃO: Para primeira predição, usar endereço sequencial como padrão
-            target = pc + 1  # Predição padrão: próxima instrução
+            
+            # CORREÇÃO: Heurística melhorada para primeira predição
+            if instruction_type == "BEQ":
+                # Para BEQ, ligeiramente tendencioso para TOMADO (heurística comum)
+                if prediction_state == PredictionState.WEAKLY_NOT_TAKEN:
+                    taken = True  # Muda para tomado por heurística
+                else:
+                    taken = prediction_state in [
+                        PredictionState.WEAKLY_TAKEN, 
+                        PredictionState.STRONGLY_TAKEN
+                    ]
+            else:
+                taken = prediction_state in [
+                    PredictionState.WEAKLY_TAKEN, 
+                    PredictionState.STRONGLY_TAKEN
+                ]
+            
+            # Target será corrigido no issue() com o offset correto
+            target = pc + 1  
             confidence = self._get_confidence(prediction_state)
-        
+
         return BranchPrediction(
             taken=taken,
             target=target,
             confidence=confidence,
             btb_hit=btb_hit
         )
+
 
     def update(self, pc: int, actual_taken: bool, actual_target: int, 
             prediction: BranchPrediction):
@@ -114,18 +130,20 @@ class BranchPredictor:
             # Se BTB está cheio, substitui entrada aleatória (política simples)
             if len(self.btb) >= self.btb_size:
                 # Remove entrada mais antiga (LRU simples)
-                oldest_pc = min(self.btb.keys())
-                del self.btb[oldest_pc]
-            
+                oldest_pc = min(self.btb.keys()) if self.btb else pc
+                if oldest_pc in self.btb:
+                    del self.btb[oldest_pc]
+
             self.btb[pc] = BTBEntry()
-        
+
         entry = self.btb[pc]
         entry.valid = True
         entry.tag = pc
-        # CORREÇÃO: Salva o endereço correto baseado no resultado
-        entry.target = target  # Usa o target real que foi calculado
+        # CORREÇÃO: Salva o target real calculado
+        entry.target = target  # Usa o target real que foi calculado na resolução
         entry.last_outcome = taken
         entry.prediction_state = self._update_prediction_state(entry.prediction_state, taken)
+
 
     def _update_prediction_state(self, current_state: PredictionState, 
                                 taken: bool) -> PredictionState:

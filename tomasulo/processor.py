@@ -105,73 +105,133 @@ class TomasuloProcessor:
         self.memory[4] = 20
 
    
-    # processor.py (correção específica para desvios)
     def issue(self) -> bool:
-        """Tenta emitir uma nova instrução com despacho fora de ordem e renomeação física inteligente"""
+        """Tenta emitir uma nova instrução com despacho fora de ordem e especulação"""
         if not self.pending_instructions:
             return False
 
+        # Verifica se PC está além do programa
+        if self.pc >= len(self.instructions):
+            print(f"PC {self.pc} está além do fim do programa ({len(self.instructions)} instruções)")
+            return False
+
         issued_any = False
-        issued_count = 0  # Contador de instruções emitidas neste ciclo
-        
-        for i in range(len(self.pending_instructions)):
+        issued_count = 0
+
+        # Cria cópia da lista para evitar modificação durante iteração
+        pending_copy = self.pending_instructions.copy()
+
+        for pc in pending_copy:
+            # Não emitir instruções além do programa
+            if pc >= len(self.instructions):
+                print(f"Removendo PC {pc} da lista pendente (além do programa)")
+                if pc in self.pending_instructions:
+                    self.pending_instructions.remove(pc)
+                continue
+                
             # Verifica limite de instruções por ciclo
             if issued_count >= self.max_issue_per_cycle:
                 break
                 
-            pc = self.pending_instructions[i]
             if pc in self.issued_instructions:
                 continue
+            
+            # CORREÇÃO: Verificar se instrução foi pulada por branch
+            if self.instruction_status[pc].get('flushed', False):
+                if pc in self.pending_instructions:
+                    self.pending_instructions.remove(pc)
+                continue
+                
             instruction = self.instructions[pc]
+            
+            # Verifica se já foi emitida
             if self.instruction_status[pc]['issue']:
                 self.issued_instructions.add(pc)
                 continue
+                
+            # Verifica disponibilidade de estação de reserva
             station = self.reservation_stations.get_available_station(instruction)
             if station is None:
                 continue
+                
+            # Verifica se ROB tem espaço
             if self.reorder_buffer.is_full():
                 continue
+            
+            # Verifica se pode emitir (não está em flush)
+            if self.recovering_from_misprediction and pc <= getattr(self, 'flush_point', -1):
+                continue
                 
-            # DETECÇÃO DE DEPENDÊNCIAS
+            # DETECÇÃO DE DEPENDÊNCIAS E RENOMEAÇÃO
             dep_type = self._check_dependencies(pc, instruction, return_type=True)
-            needs_renaming = bool(dep_type)
-            if needs_renaming:
+            old_phys = None
+            
+            if dep_type:
                 old_phys = self.register_status.allocate_physical(instruction.dest)
                 msg = f"PC {pc}: {instruction.dest} - {old_phys} → {self.register_status.get_physical(instruction.dest)} ({dep_type})"
                 self.renames_log.append(msg)
-                print(f"Renomeação necessária para {instruction.dest} (PC {pc}): {old_phys} -> {self.register_status.get_physical(instruction.dest)} [{dep_type}]")
-            else:
-                print(f"Renomeação não necessária para {instruction.dest} (PC {pc})")
+                print(f"Renomeação: PC {pc}, {instruction.dest}: {dep_type}")
             
+            # Determinação de especulação
+            is_speculative = self._is_instruction_speculative(pc)
+            
+            # CORREÇÃO: PREDIÇÃO DE DESVIO COM CÁLCULO CORRETO
             branch_prediction = None
             next_pc = pc + 1
+            will_start_speculation = False
+            
             if (self.enable_speculation and 
                 instruction.type in [InstructionType.BEQ, InstructionType.BNE]):
+                
                 branch_prediction = self.branch_predictor.predict(pc, instruction.type.value)
+                
                 if branch_prediction.taken:
-                    next_pc = pc + 1 + (instruction.immediate or 0)
-                    print(f"Predição: Desvio tomado de PC {pc} para {next_pc}")
-                    self.speculation_manager.start_speculation(pc, next_pc)
+                    # CORREÇÃO: Cálculo correto do target
+                    target_offset = instruction.immediate if instruction.immediate is not None else 0
+                    next_pc = pc + 1 + target_offset  # Fórmula correta
+                    print(f"Predição TOMADO: PC {pc} -> {next_pc}")
+                    
+                    # CORREÇÃO: Atualizar a predição com o target correto
+                    branch_prediction.target = next_pc
                 else:
                     next_pc = pc + 1
-                    print(f"Predição: Desvio não tomado no PC {pc}, próximo PC: {next_pc}")
+                    print(f"Predição NÃO TOMADO: PC {pc} -> {next_pc}")
+                
+                # Sempre inicia especulação após um branch (predição pode estar errada)
+                will_start_speculation = True
+            
+            # Status de especulação da instrução atual
+            if is_speculative:
+                print(f"Instrução PC {pc} ({instruction}) MARCADA COMO ESPECULATIVA <<<")
+            else:
+                print(f"Instrução PC {pc} ({instruction}) NÃO É ESPECULATIVA <<<")
+            
+            # EMISSÃO DA INSTRUÇÃO
             self.instruction_status[pc]['issue'] = self.cycle
-            if self.enable_speculation and self.speculation_manager.is_speculative():
+            
+            # Marca como especulativa se necessário
+            if is_speculative:
                 self.instruction_status[pc]['speculative'] = True
                 self.metrics["speculative_instructions"] += 1
-
-            is_speculative = (self.enable_speculation and self.speculation_manager.is_speculative())
+            
+            # Adiciona ao ROB
             rob_index = self.reorder_buffer.add_entry(
                 instruction, instruction.dest, speculative=is_speculative
             )
-            # Salva o físico antigo na entrada do ROB apenas se houve renomeação
-            if 'old_phys' in locals() and old_phys is not None:
+            
+            # Salva o físico antigo na entrada do ROB se houve renomeação
+            if old_phys is not None:
                 self.reorder_buffer.entries[rob_index].old_phys = old_phys
-
-            if is_speculative:
-                self.speculation_manager.add_speculative_instruction(
+            
+            # Adiciona ao speculation manager se especulativa
+            if is_speculative and self.enable_speculation:
+                success = self.speculation_manager.add_speculative_instruction(
                     instruction, pc, rob_index
                 )
+                if not success:
+                    print(f"ERRO: Falha ao adicionar instrução especulativa PC {pc}")
+            
+            # CONFIGURAÇÃO DA ESTAÇÃO DE RESERVA
             station.busy = True
             station.op = instruction.type
             station.instruction = instruction
@@ -180,16 +240,40 @@ class TomasuloProcessor:
             station.pc = pc
             station.branch_prediction = branch_prediction
             station.speculative = is_speculative
+            
+            # Configura operandos
             self._configure_operands(station, instruction)
-            if instruction.dest and instruction.type not in [InstructionType.ST, InstructionType.BEQ, InstructionType.BNE]:
+            
+            # Atualiza status do registrador de destino
+            if (instruction.dest and 
+                instruction.type not in [InstructionType.ST, InstructionType.BEQ, InstructionType.BNE]):
                 self.register_status.set_status(instruction.dest, station.name)
+            
+            # Marca como emitida
             self.issued_instructions.add(pc)
             issued_any = True
-            issued_count += 1  # Incrementa contador
-            print(f"Issue (out-of-order): PC {pc}, instrução: {instruction}")
-            if (self.enable_speculation and instruction.type in [InstructionType.BEQ, InstructionType.BNE]):
+            issued_count += 1
+            
+            print(f"Emitida: PC {pc}, {instruction}")
+            
+            # INICIA ESPECULAÇÃO APÓS EMITIR O DESVIO
+            if will_start_speculation:
+                print(f"=== INICIANDO ESPECULAÇÃO após emitir PC {pc} ===")
+                print(f"Predição: {'TOMADO' if branch_prediction.taken else 'NÃO TOMADO'}")
+                self.speculation_manager.start_speculation(pc, next_pc)
+                
+                # Atualiza PC baseado na predição
+                old_pc = self.pc
                 self.pc = next_pc
+                print(f"PC atualizado: {old_pc} -> {self.pc}")
+                
+                # Limitar PC ao tamanho do programa
+                if self.pc >= len(self.instructions):
+                    print(f"PC {self.pc} limitado ao fim do programa {len(self.instructions)-1}")
+                    self.pc = len(self.instructions)
+
         return issued_any
+
 
     def _check_dependencies(self, current_pc: int, instruction, return_type=False) -> bool:
         """Verifica se há dependências que requerem renomeação. Se return_type=True, retorna 'WAW', 'WAR' ou ''"""
@@ -312,84 +396,214 @@ class TomasuloProcessor:
         prediction = station.branch_prediction
 
         if not prediction:
-            return  # Não é um desvio com predição
+            return
 
-        print(f"Resolvendo desvio no PC {station.pc}: resultado={result}")
+        print(f"Resolvendo desvio PC {station.pc}: resultado={result}")
 
-        # CORREÇÃO: Determina resultado real baseado no tipo de desvio
+        # Lógica de desvio
         if instruction.type == InstructionType.BEQ:
-            actual_taken = (result == 1)  # BEQ: toma desvio se valores são iguais (resultado=1)
+            actual_taken = (result == 1)
         elif instruction.type == InstructionType.BNE:
-            actual_taken = (result == 1)  # BNE: toma desvio se valores são diferentes (resultado=1)
+            actual_taken = (result == 1)
         else:
-            actual_taken = False
+            return
 
-        # CORREÇÃO: Cálculo correto dos endereços
+        # Calcular target real
         if actual_taken:
-            actual_target = station.pc + 1 + (instruction.immediate or 0)
+            target_offset = instruction.immediate if instruction.immediate is not None else 0
+            actual_target = station.pc + 1 + target_offset
         else:
-            actual_target = station.pc + 1  # Próxima instrução sequencial
+            actual_target = station.pc + 1
 
-        # CORREÇÃO: Recalcula o que deveria ter sido predito
         predicted_taken = prediction.taken
-        if predicted_taken:
-            predicted_target = station.pc + 1 + (instruction.immediate or 0)
-        else:
-            predicted_target = station.pc + 1
+        predicted_target = prediction.target
 
         print(f"Real: tomado={actual_taken}, target={actual_target}")
         print(f"Predito: tomado={predicted_taken}, target={predicted_target}")
 
-        # Verifica misprediction
-        mispredicted = self.speculation_manager.resolve_branch(
-            station.pc, actual_taken, actual_target,
-            predicted_taken, predicted_target
-        )
+        # Verificação de misprediction
+        mispredicted = (actual_taken != predicted_taken or 
+                    (actual_taken and actual_target != predicted_target))
 
-        # Atualiza preditor
-        self.branch_predictor.update(
-            station.pc, actual_taken, actual_target, prediction
-        )
+        # Atualizar preditor
+        self.branch_predictor.update(station.pc, actual_taken, actual_target, prediction)
+
+        # CORREÇÃO: Cancelar instruções especulativas mesmo com predição correta
+        if actual_taken and actual_target > station.pc + 1:
+            # Marca instruções como puladas
+            self._mark_skipped_instructions(station.pc + 1, actual_target)
+            
+            # NOVO: Cancela instruções especulativas já emitidas no caminho errado
+            self._cancel_wrong_path_instructions(station.pc + 1, actual_target)
+
+        # Resolver no speculation manager
+        if self.speculation_manager:
+            spec_mispredicted = self.speculation_manager.resolve_branch(
+                station.pc, actual_taken, actual_target,
+                predicted_taken, predicted_target
+            )
+            mispredicted = mispredicted or spec_mispredicted
 
         if mispredicted:
-            print(f"*** MISPREDICTION detectada no PC {station.pc} ***")
+            print(f"*** MISPREDICTION no PC {station.pc} ***")
             self.metrics["mispredictions"] += 1
             self._handle_misprediction(station.pc, actual_target)
         else:
             print(f"Predição correta no PC {station.pc}")
 
+
+    def _mark_skipped_instructions(self, start_pc: int, end_pc: int):
+        """Marca instruções como puladas mesmo com predição correta"""
+        for pc in range(start_pc, end_pc):
+            if pc < len(self.instructions):
+                if pc in self.pending_instructions:
+                    self.pending_instructions.remove(pc)
+                self.instruction_status[pc]['skipped'] = True
+                print(f"Instrução PC {pc} marcada como PULADA (predição correta)")
+
+    def _cancel_wrong_path_instructions(self, start_pc: int, end_pc: int):
+        """Cancela instruções já emitidas que estão no caminho errado (mesmo com predição correta)"""
+        print(f"Cancelando instruções no caminho errado: PC {start_pc} até {end_pc-1}")
+
+        instructions_to_cancel = []
+
+        # Encontra instruções emitidas que estão no caminho errado
+        for pc in self.issued_instructions.copy():
+            if start_pc <= pc < end_pc:
+                instructions_to_cancel.append(pc)
+
+        if not instructions_to_cancel:
+            return
+
+        print(f"Instruções a cancelar: {instructions_to_cancel}")
+
+        # Cancela as instruções
+        for pc in instructions_to_cancel:
+            # Remove das instruções emitidas
+            self.issued_instructions.remove(pc)
+            
+            # Marca como cancelada
+            self.instruction_status[pc]['flushed'] = True
+            self.instruction_status[pc]['cancelled_by_correct_branch'] = True
+            
+            print(f"Cancelando instrução PC {pc} (estava no caminho errado)")
+            
+            # Remove da estação de reserva se ainda estiver lá
+            for name, station_obj in self.reservation_stations.get_all_stations().items():
+                if (station_obj.busy and 
+                    hasattr(station_obj, 'pc') and 
+                    station_obj.pc == pc):
+                    print(f"Removendo PC {pc} da estação {name}")
+                    self._clear_station(station_obj)
+                    break
+            
+            # Marca entrada do ROB como flushed
+            for i, entry in enumerate(self.reorder_buffer.entries):
+                if entry and not entry.flushed:
+                    # Encontra a instrução correspondente
+                    for instr_pc, instr in enumerate(self.instructions):
+                        if (str(instr) == str(entry.instruction) and 
+                            instr_pc == pc):
+                            entry.flushed = True
+                            print(f"Marcando ROB entry {i} como flushed (PC {pc})")
+                            break
+
+
+
     def _handle_misprediction(self, branch_pc: int, correct_target: int):
         """Trata misprediction fazendo flush das instruções especulativas"""
-        print(f"Fazendo flush de instruções especulativas após PC {branch_pc}")
-        print(f"PC correto: {correct_target}")
+        print(f"*** MISPREDICTION DETECTADA ***")
+        print(f"*** FLUSH: Branch PC {branch_pc} -> Target correto {correct_target} ***")
 
-        # Flush instruções especulativas
-        flushed_indices = self.speculation_manager.flush_speculative_instructions(branch_pc)
-        print(f"Flushed {len(flushed_indices)} instruções especulativas")
+        self.flush_point = branch_pc
+        flushed_count = 0
+        instructions_to_flush = []
 
-        # Remove entradas do ROB
-        for rob_index in flushed_indices:
-            self.reorder_buffer.flush_entry(rob_index)
+        # CORREÇÃO: Determinar quais instruções devem ser flushed
+        for pc in list(self.issued_instructions):
+            should_flush = False
+            
+            # CASO 1: Instruções no caminho especulativo errado (entre branch+1 e target correto)
+            if pc > branch_pc and pc < correct_target:
+                should_flush = True
+                print(f"Flushing instrução PC {pc} (no caminho especulativo errado - deveria ser pulada)")
+            
+            # CASO 2: Instruções emitidas especulativamente após o branch
+            elif pc > branch_pc:
+                if self.instruction_status[pc].get('speculative', False):
+                    should_flush = True
+                    print(f"Flushing instrução especulativa PC {pc}")
+            
+            if should_flush:
+                instructions_to_flush.append(pc)
+                self.instruction_status[pc]['flushed'] = True
+                self.issued_instructions.remove(pc)
+                flushed_count += 1
 
-        # Marca instruções como flushed no status e remove da lista de emitidas
-        for i, instr_status in enumerate(self.instruction_status):
-            if instr_status['pc'] > branch_pc and instr_status.get('speculative', False):
-                instr_status['flushed'] = True
-                # DESPACHO FORA DE ORDEM: Remove da lista de instruções emitidas
-                if instr_status['pc'] in self.issued_instructions:
-                    self.issued_instructions.remove(instr_status['pc'])
-                print(f"Marcando instrução no PC {instr_status['pc']} como flushed")
+        # Flush estações de reserva
+        flushed_stations = 0
+        for name, station in self.reservation_stations.get_all_stations().items():
+            if (station.busy and 
+                hasattr(station, 'pc') and 
+                station.pc in instructions_to_flush):
+                
+                print(f"Flushing estação {name} com PC {station.pc}")
+                self._clear_station(station)
+                flushed_stations += 1
 
-        # Limpa estações de reserva especulativas
-        flushed_stations = self.reservation_stations.flush_speculative_stations(branch_pc)
-        print(f"Limpas {len(flushed_stations)} estações especulativas")
+        # Flush entradas do ROB
+        rob_flushed = 0
+        flushed_rob_indices = []
+        for i, entry in enumerate(self.reorder_buffer.entries):
+            if entry and not entry.flushed:
+                # Encontra PC da instrução
+                for instr_pc, instr in enumerate(self.instructions):
+                    if (str(instr) == str(entry.instruction) and 
+                        instr_pc in instructions_to_flush):
+                        entry.flushed = True
+                        flushed_rob_indices.append(i)
+                        rob_flushed += 1
+                        print(f"Flushing ROB entry {i} com PC {instr_pc}")
+                        break
 
-        # CRÍTICO: Restaura PC correto
+        # Flush speculation manager
+        if self.speculation_manager:
+            spec_flushed = self.speculation_manager.flush_speculative_instructions(branch_pc)
+            print(f"Speculation manager flushed {len(spec_flushed)} instruções")
+
+        # CORREÇÃO: Reconstruir pending_instructions corretamente
+        self.pending_instructions = []
+        for i in range(len(self.instructions)):
+            # Adiciona instruções que ainda não foram processadas
+            is_not_issued = i not in self.issued_instructions
+            is_not_flushed = not self.instruction_status[i].get('flushed', False)
+            is_not_committed = not self.instruction_status[i].get('commit', False)
+            
+            if is_not_issued and is_not_flushed and is_not_committed:
+                self.pending_instructions.append(i)
+
+        # CORREÇÃO: Marcar instruções puladas pelo branch como não executáveis
+        if correct_target > branch_pc + 1:
+            for pc in range(branch_pc + 1, correct_target):
+                if pc < len(self.instructions):
+                    # Remove das pendentes se estiver lá
+                    if pc in self.pending_instructions:
+                        self.pending_instructions.remove(pc)
+                    # Marca como pulada (mas não flushed, pois nunca foi emitida)
+                    self.instruction_status[pc]['skipped'] = True
+                    print(f"Instrução PC {pc} marcada como PULADA pelo branch")
+
+        # Restaurar PC correto
         old_pc = self.pc
         self.pc = correct_target
-        print(f"PC restaurado de {old_pc} para {self.pc}")
+
+        print(f"Flushed {flushed_count} instruções, {flushed_stations} estações, {rob_flushed} ROB entries")
+        print(f"PC: {old_pc} -> {self.pc}")
+        print(f"Pending instructions: {self.pending_instructions}")
+        print(f"ROB indices flushed: {flushed_rob_indices}")
 
         self.recovering_from_misprediction = True
+
 
     def _flush_speculative_stations(self, branch_pc: int):
         """Remove instruções especulativas das estações de reserva"""
@@ -477,7 +691,8 @@ class TomasuloProcessor:
                     "qk": station.qk,
                     "a": station.a,
                     "remaining_cycles": station.remaining_cycles,
-                    "speculative": hasattr(station, 'branch_prediction') and station.branch_prediction is not None
+                    "speculative": getattr(station, 'speculative', False),
+                    "pc": getattr(station, 'pc', None)
                 }
                 for name, station in self.reservation_stations.get_all_stations().items()
             },
@@ -490,18 +705,21 @@ class TomasuloProcessor:
                     "value": entry.value if entry else None,
                     "ready": entry.ready if entry else None,
                     "speculative": entry.speculative if entry else False,
-                    "branch_mispredicted": entry.branch_mispredicted if entry else False
+                    "branch_mispredicted": entry.branch_mispredicted if entry else False,
+                    "flushed": entry.flushed if entry else False,
+                    "rob_index": i  # Adicionar índice do ROB
                 }
-                for entry in self.reorder_buffer.get_all_entries()
+                for i, entry in enumerate(self.reorder_buffer.get_all_entries())
             ],
             "is_finished": self.is_finished
         }
-        
+
         # Adiciona estado de especulação se habilitado
         if self.enable_speculation:
             base_state["speculation"] = self.get_speculation_state()
-        
+
         return base_state
+
     
     def commit(self):
         """Tenta fazer commit de uma instrução"""
@@ -533,14 +751,18 @@ class TomasuloProcessor:
     def step(self) -> bool:
         """Executa um ciclo do processador"""
         self.renames_log = []  # Limpa log de renomeações a cada ciclo
+
         if self.is_finished:
             return False
 
         self.cycle += 1
         self.metrics["total_cycles"] += 1
 
-        # Debug menos verboso - só a cada 10 ciclos
-        if self.cycle % 10 == 1:
+        # Debug menos verboso - só a cada 10 ciclos ou quando há atividade
+        debug_this_cycle = (self.cycle % 10 == 1 or 
+                        self.metrics["bubble_cycles"] % 10 == 1)
+
+        if debug_this_cycle:
             print(f"\n=== Ciclo {self.cycle} ===")
             print(f"PC atual: {self.pc}")
 
@@ -554,20 +776,33 @@ class TomasuloProcessor:
         committed = self.commit()
 
         # Detecta ciclos de bolha
-        if not (issued or executed or committed) and not self.is_program_finished():
-            self.metrics["bubble_cycles"] += 1
-            
-            # Debug a cada 10 bolhas
-            if self.metrics["bubble_cycles"] % 10 == 0:
-                print(f"Ciclo de bolha #{self.metrics['bubble_cycles']}")
+        if not (issued or executed or committed):
+            if not self.is_program_finished():
+                self.metrics["bubble_cycles"] += 1
                 
-            # Prevenção de deadlock
-            if self.metrics["bubble_cycles"] > 50:
-                print("ALERTA: Muitos ciclos de bolha. Verificando estado...")
-                self.debug_state()
+                # Debug a cada 10 bolhas
+                if self.metrics["bubble_cycles"] % 10 == 0:
+                    print(f"Ciclo de bolha #{self.metrics['bubble_cycles']}")
+                    self.debug_state()
                 
-            if self.metrics["bubble_cycles"] > 100:
-                print("Forçando conclusão devido a deadlock.")
+                # CORREÇÃO: Reduzir limite de deadlock
+                if self.metrics["bubble_cycles"] > 20:
+                    print("ALERTA: Muitos ciclos de bolha. Verificando estado...")
+                    self.debug_state()
+                    
+                    # Verifica se realmente terminou
+                    if self.is_program_finished():
+                        print("Programa realmente terminou - finalizando")
+                        self.is_finished = True
+                        return False
+                    
+                if self.metrics["bubble_cycles"] > 30:
+                    print("Forçando conclusão devido a possível deadlock.")
+                    self.is_finished = True
+                    return False
+            else:
+                # Programa terminou naturalmente
+                print("Programa terminou naturalmente")
                 self.is_finished = True
                 return False
 
@@ -594,22 +829,58 @@ class TomasuloProcessor:
         print(f"Mispredictions: {bp_stats['mispredictions']}")
 
     def is_program_finished(self) -> bool:
-        """Verifica se o programa terminou - versão para despacho fora de ordem"""
-        # Verifica se todas as instruções foram emitidas
-        if len(self.issued_instructions) < len(self.instructions):
-            return False
+        """Verifica se o programa terminou - versão corrigida"""
+
+        # Debug do estado atual
+        print(f"\n=== Verificando fim do programa (Ciclo {self.cycle}) ===")
+        print(f"PC atual: {self.pc}")
+        print(f"Total de instruções: {len(self.instructions)}")
+        print(f"Instruções emitidas: {len(self.issued_instructions)}/{len(self.instructions)}")
+        print(f"Instruções commitadas: {self.metrics['committed_instructions']}")
+
+        # Verifica se todas as instruções foram commitadas
+        if self.metrics['committed_instructions'] >= len(self.instructions):
+            print("Todas as instruções foram commitadas")
+            return True
+
+        # CORREÇÃO: Contar apenas instruções válidas (não flushed e não puladas)
+        valid_instructions = 0
+        for i, instr_status in enumerate(self.instruction_status):
+            is_flushed = instr_status.get('flushed', False)
+            is_skipped = instr_status.get('skipped', False)
+            is_committed = instr_status.get('commit', False)
             
-        # Verifica se todas as estações estão livres
-        for station in self.reservation_stations.get_all_stations().values():
-            if station.busy:
-                return False
-        
-        # Verifica se ROB está vazio
-        self.reorder_buffer.cleanup_flushed()
-        if not self.reorder_buffer.is_empty():
-            return False
-        
-        return True
+            if not is_flushed and not is_skipped:
+                valid_instructions += 1
+            elif is_committed:
+                # Instruções commitadas contam mesmo se foram flushed/skipped depois
+                valid_instructions += 1
+
+        print(f"Instruções válidas (não flushed/skipped): {valid_instructions}")
+
+        # Verifica se todas as instruções válidas foram processadas
+        if self.metrics['committed_instructions'] >= valid_instructions:
+            # Verifica se todas as estações estão livres
+            busy_stations = []
+            for name, station in self.reservation_stations.get_all_stations().items():
+                if station.busy:
+                    busy_stations.append(f"{name}(PC:{getattr(station, 'pc', 'N/A')})")
+            
+            print(f"Estações ocupadas: {busy_stations}")
+            
+            if not busy_stations:
+                # Verifica se ROB está vazio
+                self.reorder_buffer.cleanup_flushed()
+                rob_entries = sum(1 for entry in self.reorder_buffer.entries 
+                                if entry and not entry.flushed)
+                print(f"Entradas no ROB: {rob_entries}")
+                
+                if rob_entries == 0:
+                    print("Programa finalizado - todas as estruturas estão vazias")
+                    return True
+
+        print("Programa ainda em execução")
+        return False
 
     def get_metrics(self) -> Dict:
         """Retorna métricas de desempenho"""
@@ -695,3 +966,47 @@ class TomasuloProcessor:
         if self.enable_speculation:
             print(f"Nível de especulação: {self.speculation_manager.get_speculation_level()}")
             print(f"Recuperando de misprediction: {self.recovering_from_misprediction}")
+
+
+    def _is_instruction_speculative(self, pc: int) -> bool:
+        """Determina se uma instrução deve ser marcada como especulativa"""
+        if not self.enable_speculation:
+            return False
+
+        # Se já estamos em modo especulativo, a instrução é especulativa
+        if self.speculation_manager.is_speculative():
+            return True
+
+        # CORREÇÃO: Verifica se há branches emitidos mas ainda não COMMITADOS antes desta instrução
+        for issued_pc in self.issued_instructions:
+            if issued_pc < pc:
+                issued_instr = self.instructions[issued_pc]
+                if issued_instr.type in [InstructionType.BEQ, InstructionType.BNE]:
+                    # CORREÇÃO: Verifica se este branch ainda não foi COMMITADO (não apenas resolvido)
+                    if not self.instruction_status[issued_pc].get('commit', False):
+                        print(f"Instrução PC {pc} é especulativa devido ao branch não commitado PC {issued_pc}")
+                        return True
+
+        return False
+
+
+    def _is_branch_unresolved(self, branch_pc: int) -> bool:
+        """Verifica se um branch ainda não foi resolvido"""
+        # Verifica se está em alguma estação de reserva
+        for station in self.reservation_stations.get_all_stations().values():
+            if (station.busy and 
+                hasattr(station, 'pc') and 
+                station.pc == branch_pc and
+                station.instruction.type in [InstructionType.BEQ, InstructionType.BNE]):
+                return True
+
+        # Verifica se está no ROB mas ainda não foi commitado
+        for entry in self.reorder_buffer.entries:
+            if (entry and not entry.flushed and 
+                entry.instruction.type in [InstructionType.BEQ, InstructionType.BNE]):
+                # Encontra o PC desta instrução
+                for i, instr in enumerate(self.instructions):
+                    if str(instr) == str(entry.instruction) and i == branch_pc:
+                        return not self.instruction_status[i].get('commit', False)
+
+        return False
