@@ -384,7 +384,7 @@ class MainWindow(QMainWindow):
             self.fp_registers_table.setItem(row, 1, QTableWidgetItem(str(info['value'])))
             self.fp_registers_table.setItem(row, 2, QTableWidgetItem(str(info['status'])))
 
-        # Atualizar estações de reserva
+        
         self.stations_table.setRowCount(0)
         for name, info in state['reservation_stations'].items():
             row = self.stations_table.rowCount()
@@ -394,9 +394,24 @@ class MainWindow(QMainWindow):
             self.stations_table.setItem(row, 2, QTableWidgetItem(str(info['op'])))
             self.stations_table.setItem(row, 3, QTableWidgetItem(str(info['vj'])))
             self.stations_table.setItem(row, 4, QTableWidgetItem(str(info['vk'])))
-            self.stations_table.setItem(row, 5, QTableWidgetItem(str(info['qj'])))
-            self.stations_table.setItem(row, 6, QTableWidgetItem(str(info['qk'])))
+
+            # Criar itens para Qj e Qk
+            qj_item = QTableWidgetItem(str(info['qj']))
+            qk_item = QTableWidgetItem(str(info['qk']))
+
+            # Aplicar cor de fundo vermelha clara se houver dependência
+            from PyQt6.QtGui import QColor
+            light_red = QColor(255, 200, 200)  # Vermelho claro
+
+            if info['qj'] is not None and str(info['qj']) != 'None':
+                qj_item.setBackground(light_red)
+            if info['qk'] is not None and str(info['qk']) != 'None':
+                qk_item.setBackground(light_red)
+
+            self.stations_table.setItem(row, 5, qj_item)
+            self.stations_table.setItem(row, 6, qk_item)
             self.stations_table.setItem(row, 7, QTableWidgetItem(str(info.get('remaining_cycles', ''))))
+
 
         # Atualizar buffer de reordenamento
         self.rob_table.setRowCount(0)

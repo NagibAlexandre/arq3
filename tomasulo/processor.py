@@ -279,10 +279,14 @@ class TomasuloProcessor:
         """Verifica se há dependências que requerem renomeação. Se return_type=True, retorna 'WAW', 'WAR' ou ''"""
         if not instruction.dest:
             return False if not return_type else ''
+            
+        # Verifica instruções já emitidas
         for pc in self.issued_instructions:
             if pc >= current_pc:
                 continue
+                
             other_instruction = self.instructions[pc]
+            
             # WAW (Write After Write) - Dependência falsa
             if (other_instruction.dest and 
                 other_instruction.dest == instruction.dest and
@@ -290,14 +294,17 @@ class TomasuloProcessor:
                 if return_type:
                     return 'WAW'
                 return True
+                
             # WAR (Write After Read) - Antidependência
-            if (other_instruction.dest and 
-                other_instruction.dest in [instruction.src1, instruction.src2] and
+            if (instruction.dest and 
+                instruction.dest in [other_instruction.src1, other_instruction.src2] and
                 other_instruction.type not in [InstructionType.ST, InstructionType.BEQ, InstructionType.BNE]):
                 if return_type:
                     return 'WAR'
                 return True
+                
         return False if not return_type else ''
+
 
     def _configure_operands(self, station, instruction):
         """Configura operandos incluindo para desvios"""

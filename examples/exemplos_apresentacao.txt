@@ -1,0 +1,26 @@
+## Dependencias falsas
+
+LD R1, 0(R0)   
+LD R2, 4(R0)    
+ADD R3, R1, R2  
+MUL R3, R3, R1  
+ST R4, 8(R0)    
+
+## Dependencias Verdadeiras
+
+LD R1, 0(R0)    
+LD R2, 4(R0)    
+ADD R3, R2, R1
+MUL R4, R2, R3
+SUB R5, R4, R3
+
+## Misprediction -> trocar issue dispachadas para 1 para ser mais facil de ver
+
+LD R1, 0(R0)
+LD R2, 4(R0)
+SUB R3, R1, R1
+BEQ R3, R0, 3
+ADD R4, R1, R2
+MUL R5, R1, R2
+DIV R6, R2, R1
+ST R1, 8(R0)
