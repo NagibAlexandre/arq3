@@ -3,7 +3,7 @@
 LD R1, 0(R0)   
 LD R2, 4(R0)    
 ADD R3, R1, R2  
-MUL R3, R3, R1  
+MUL R3, R1, R1  
 ST R4, 8(R0)    
 
 ## Dependencias Verdadeiras

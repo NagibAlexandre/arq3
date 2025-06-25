@@ -435,6 +435,20 @@ class TomasuloProcessor:
         # Atualizar preditor
         self.branch_predictor.update(station.pc, actual_taken, actual_target, prediction)
 
+        # CORREÇÃO: Sempre limpa o estado especulativo quando um branch é resolvido
+        if self.speculation_manager.is_speculative():
+            print("=== LIMPANDO ESPECULAÇÃO - BRANCH RESOLVIDO ===")
+            self.speculation_manager.speculation_level = 0
+            self.speculation_manager.branch_stack.clear()
+            
+            # Remove todas as instruções da lista especulativa
+            for spec_instr in self.speculation_manager.speculative_instructions:
+                if spec_instr.pc < len(self.instructions):
+                    self.instruction_status[spec_instr.pc]['speculative'] = False
+                    print(f"Instrução PC {spec_instr.pc} não é mais especulativa")
+            
+            self.speculation_manager.speculative_instructions.clear()
+
         # CORREÇÃO: Cancelar instruções especulativas mesmo com predição correta
         if actual_taken and actual_target > station.pc + 1:
             # Marca instruções como puladas
@@ -443,20 +457,14 @@ class TomasuloProcessor:
             # NOVO: Cancela instruções especulativas já emitidas no caminho errado
             self._cancel_wrong_path_instructions(station.pc + 1, actual_target)
 
-        # Resolver no speculation manager
-        if self.speculation_manager:
-            spec_mispredicted = self.speculation_manager.resolve_branch(
-                station.pc, actual_taken, actual_target,
-                predicted_taken, predicted_target
-            )
-            mispredicted = mispredicted or spec_mispredicted
-
+        # Resolver no speculation manager (após limpeza)
         if mispredicted:
             print(f"*** MISPREDICTION no PC {station.pc} ***")
             self.metrics["mispredictions"] += 1
             self._handle_misprediction(station.pc, actual_target)
         else:
             print(f"Predição correta no PC {station.pc}")
+
 
 
     def _mark_skipped_instructions(self, start_pc: int, end_pc: int):
@@ -980,21 +988,29 @@ class TomasuloProcessor:
         if not self.enable_speculation:
             return False
 
-        # Se já estamos em modo especulativo, a instrução é especulativa
+        # Se já estamos em modo especulativo ativo, a instrução é especulativa
         if self.speculation_manager.is_speculative():
             return True
 
-        # CORREÇÃO: Verifica se há branches emitidos mas ainda não COMMITADOS antes desta instrução
+        # CORREÇÃO: Verifica se há branches PENDENTES (não resolvidos) antes desta instrução
         for issued_pc in self.issued_instructions:
             if issued_pc < pc:
                 issued_instr = self.instructions[issued_pc]
                 if issued_instr.type in [InstructionType.BEQ, InstructionType.BNE]:
-                    # CORREÇÃO: Verifica se este branch ainda não foi COMMITADO (não apenas resolvido)
-                    if not self.instruction_status[issued_pc].get('commit', False):
-                        print(f"Instrução PC {pc} é especulativa devido ao branch não commitado PC {issued_pc}")
+                    instr_status = self.instruction_status[issued_pc]
+                    
+                    # CORREÇÃO: Se o branch foi executado (write_result), ele foi resolvido
+                    # Não precisa mais gerar especulação
+                    is_resolved = instr_status.get('write_result', False)
+                    
+                    if not is_resolved:
+                        print(f"Instrução PC {pc} é especulativa devido ao branch não resolvido PC {issued_pc}")
                         return True
+                    else:
+                        print(f"Branch PC {issued_pc} já foi resolvido - não gera mais especulação")
 
         return False
+
 
 
     def _is_branch_unresolved(self, branch_pc: int) -> bool:

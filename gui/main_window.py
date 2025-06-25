@@ -426,6 +426,8 @@ class MainWindow(QMainWindow):
             self.rob_table.setItem(row, 2, QTableWidgetItem(str(entry['destination'])))
             self.rob_table.setItem(row, 3, QTableWidgetItem(str(entry['value'])))
             self.rob_table.setItem(row, 4, QTableWidgetItem(str(entry['ready'])))
+            self.rob_table.setItem(row, 5, QTableWidgetItem("Yes" if entry['speculative'] else "No"))
+
             
             # Highlight speculative entries
             if entry.get('branch_mispredicted', False):
